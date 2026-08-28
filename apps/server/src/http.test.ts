@@ -84,10 +84,33 @@ describe("assetResponseHeaders", () => {
   });
 
   it("keeps renderable mime types as octet-stream downloads", () => {
-    for (const mimeType of ["text/html", "image/svg+xml", "application/xml", "not a mime"]) {
+    for (const mimeType of [
+      "text/html",
+      "text/xml",
+      "image/svg+xml",
+      "application/xhtml+xml",
+      "application/rss+xml",
+      "APPLICATION/XML",
+      "IMAGE/SVG+XML",
+      "application/xml-dtd",
+      "application/xml-external-parsed-entity",
+      "not a mime",
+    ]) {
       expect(
         assetResponseHeaders("/attachments/upload.bin", { download: true, mimeType }),
       ).toHaveProperty("Content-Type", "application/octet-stream");
+    }
+  });
+
+  it("preserves official Office Open XML mime types", () => {
+    for (const mimeType of [
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ]) {
+      expect(
+        assetResponseHeaders("/attachments/upload.bin", { download: true, mimeType }),
+      ).toHaveProperty("Content-Type", mimeType);
     }
   });
 });
