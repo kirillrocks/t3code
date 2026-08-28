@@ -1952,7 +1952,7 @@ export function GeneralSettingsPanel() {
 
         <SettingsRow
           {...searchableSetting("sort-active-threads")}
-          description="Created keeps the list still while agents work. Recent activity moves a thread to the top when you send it a message."
+          description="Recent activity moves a thread to the top when you send it a message. Created keeps the list still while agents work."
           resetAction={
             settings.sidebarActiveThreadSortOrder !==
             DEFAULT_UNIFIED_SETTINGS.sidebarActiveThreadSortOrder ? (

@@ -1243,7 +1243,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     return (
       <li
         data-thread-item
-        className="list-none [content-visibility:auto] [contain-intrinsic-size:auto_30px]"
+        className="list-none [content-visibility:auto] [contain-intrinsic-size:auto_34px]"
       >
         <Tooltip>
           <TooltipTrigger
@@ -1253,7 +1253,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 tabIndex={0}
                 data-testid="sidebar-row-slim"
                 aria-busy={isRegeneratingTitle || undefined}
-                className={cn(rowSurfaceClassName, "flex h-[1.875rem] items-center gap-2 px-2.5")}
+                className={cn(rowSurfaceClassName, "flex h-9 items-center gap-2.5 px-2.5")}
                 onClick={handleClick}
                 onDoubleClick={handleDoubleClick}
                 onKeyDown={handleKeyDown}
@@ -1411,7 +1411,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       }
       {...(sortable?.listeners ?? {})}
       className={cn(
-        "list-none py-px [content-visibility:auto] [contain-intrinsic-size:auto_80px]",
+        "list-none py-0.5 [content-visibility:auto] [contain-intrinsic-size:auto_92px]",
         sortable?.isDragging && "z-20 opacity-80",
       )}
     >
@@ -1431,7 +1431,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             />
           }
         >
-          <div className="relative z-10 h-[4.125rem] px-[var(--sidebar-row-content-inset)] py-1.5">
+          <div className="relative z-10 h-[4.625rem] px-[var(--sidebar-row-content-inset)] py-[var(--sidebar-content-inset)]">
             <div className="flex h-5 min-w-0 items-center gap-1.5">
               <ProjectFavicon
                 environmentId={thread.environmentId}
@@ -1447,7 +1447,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                     "min-w-0 flex-1 truncate text-xs",
                     shouldRecede
                       ? "font-normal text-secondary-label"
-                      : "font-semibold text-foreground/85",
+                      : "font-medium text-foreground/80",
                   )}
                 >
                   {props.projectTitle}
@@ -1563,7 +1563,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 ) : null}
               </span>
             </div>
-            <div className="mt-0.5 flex min-w-0">
+            <div className="mt-1 flex min-w-0">
               {title}
               {isRegeneratingTitle ? (
                 <span role="status" className="sr-only">

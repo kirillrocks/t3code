@@ -37,9 +37,9 @@ export const DEFAULT_SIDEBAR_PROJECT_SORT_ORDER: SidebarProjectSortOrder = "upda
 export const SidebarThreadSortOrder = Schema.Literals(["updated_at", "created_at"]);
 export type SidebarThreadSortOrder = typeof SidebarThreadSortOrder.Type;
 export const DEFAULT_SIDEBAR_THREAD_SORT_ORDER: SidebarThreadSortOrder = "updated_at";
-// Default sidebar's active list: static creation order unless the user opts
-// into recent-activity order (last user message on top).
-export const DEFAULT_SIDEBAR_ACTIVE_THREAD_SORT_ORDER: SidebarThreadSortOrder = "created_at";
+// Default sidebar's active list: recent activity (last user message on top)
+// unless the user opts into static creation order.
+export const DEFAULT_SIDEBAR_ACTIVE_THREAD_SORT_ORDER: SidebarThreadSortOrder = "updated_at";
 
 export const SidebarProjectGroupingMode = Schema.Literals([
   "repository",

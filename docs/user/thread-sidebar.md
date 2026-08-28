@@ -2,13 +2,12 @@
 
 ## Sort order
 
-Active threads are listed newest first by default, and the list stays still while agents work.
-To change this, open the sort menu (the arrows icon beside the project filter) or go to Settings →
-General → **Sort active threads**:
+By default the thread you last sent a message to is on top. To change this, open the sort menu
+(the arrows icon beside the project filter) or go to Settings → General → **Sort active threads**:
 
+- **Recent activity** (default): the thread you last sent a message to moves to the top. Agent
+  replies do not move a thread, so the list only changes when you act.
 - **Created**: newest thread on top. A thread keeps its place until it settles or you un-settle it.
-- **Recent activity**: the thread you last sent a message to moves to the top. Agent replies do not
-  move a thread, so the list only changes when you act.
 
 Pinned, snoozed, and settled sections keep their own order.
 
