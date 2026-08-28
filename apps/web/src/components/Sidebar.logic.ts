@@ -539,24 +539,37 @@ export function firstValidTimestamp(
   return null;
 }
 
-// Sidebar sort: static order, newest anchor on top. Activity NEVER reorders
-// the list — a row holds its position between lifecycle transitions, so the
-// screen only moves when a thread enters or leaves the active list. The
-// anchor is creation time until an un-settle re-anchors it (see
-// activeThreadAnchorTimestampMs), so an un-settled thread surfaces at the
-// top instead of sinking back to its creation-order slot. Status (including
-// pending approval) is carried by each card's edge strip, not by position.
+// Sidebar sort, two user-selectable orders:
+// - created_at (default): static order, newest anchor on top. Activity NEVER
+//   reorders the list — a row holds its position between lifecycle
+//   transitions, so the screen only moves when a thread enters or leaves the
+//   active list. The anchor is creation time until an un-settle re-anchors it
+//   (see activeThreadAnchorTimestampMs), so an un-settled thread surfaces at
+//   the top instead of sinking back to its creation-order slot.
+// - updated_at: recent activity. The thread with the latest USER message is
+//   on top. Agent output never moves a row (that would make the list jump
+//   while agents work); only the user sending a message, or an un-settle,
+//   lifts a thread.
+// Status (including pending approval) is carried by each card's edge strip,
+// not by position, in both orders.
 export function sortThreadsForSidebar<
   T extends {
     readonly id: string;
     readonly createdAt: string;
     readonly unsettledAt?: string | null | undefined;
+    readonly latestUserMessageAt?: string | null | undefined;
   },
->(threads: readonly T[]): T[] {
+>(threads: readonly T[], sortOrder: SidebarThreadSortOrder = "created_at"): T[] {
+  const anchor =
+    sortOrder === "updated_at"
+      ? (thread: T) =>
+          Math.max(
+            activeThreadAnchorTimestampMs(thread),
+            firstValidTimestampMs(thread.latestUserMessageAt),
+          )
+      : activeThreadAnchorTimestampMs;
   return [...threads].toSorted(
-    (left, right) =>
-      activeThreadAnchorTimestampMs(right) - activeThreadAnchorTimestampMs(left) ||
-      left.id.localeCompare(right.id),
+    (left, right) => anchor(right) - anchor(left) || left.id.localeCompare(right.id),
   );
 }
 

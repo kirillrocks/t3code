@@ -33,7 +33,15 @@ describe("buildThreadActionMenuItems", () => {
         ...baseState,
         supports: { settlement: false, snooze: false, pinning: false, titleRegeneration: false },
       }),
-    ).toEqual(["rename", "mark-unread", "copy", "archive", "delete"]);
+    ).toEqual(["new-thread-in-project", "rename", "mark-unread", "copy", "archive", "delete"]);
+  });
+
+  it("always offers a new thread in the same project", () => {
+    expect(ids(baseState)[0]).toBe("new-thread-in-project");
+    expect(ids({ ...baseState, branch: "feat/menu" }).slice(0, 2)).toEqual([
+      "new-thread-in-project",
+      "new-thread-on-branch",
+    ]);
   });
 
   it("includes branch items only for threads with a branch", () => {

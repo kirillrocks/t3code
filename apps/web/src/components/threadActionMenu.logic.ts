@@ -7,6 +7,7 @@ import type { SnoozePreset } from "@t3tools/client-runtime/state/thread-settled"
  * remains data-driven.
  */
 export type ThreadActionMenuId =
+  | "new-thread-in-project"
   | "new-thread-on-branch"
   | "pin"
   | "unpin"
@@ -52,6 +53,13 @@ export function buildThreadActionMenuItems(
   state: ThreadActionMenuState,
 ): ReadonlyArray<ContextMenuItem<ThreadActionMenuId>> {
   return [
+    // Same project, fresh defaults (branch, worktree, env mode come from the
+    // user's settings). The branch item below is the explicit carry-over.
+    {
+      id: "new-thread-in-project" as const,
+      label: "New thread in this project",
+      icon: "message-square-plus",
+    },
     ...(state.branch
       ? [
           {

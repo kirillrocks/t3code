@@ -1,5 +1,25 @@
 # Organizing threads
 
+## Sort order
+
+Active threads are listed newest first by default, and the list stays still while agents work.
+To change this, open the sort menu (the arrows icon beside the project filter) or go to Settings →
+General → **Sort active threads**:
+
+- **Created**: newest thread on top. A thread keeps its place until it settles or you un-settle it.
+- **Recent activity**: the thread you last sent a message to moves to the top. Agent replies do not
+  move a thread, so the list only changes when you act.
+
+Pinned, snoozed, and settled sections keep their own order.
+
+## Starting a thread in the same project
+
+Click the arrow beside **New thread** to start a thread in the project you are viewing, or pick
+another project. Right-click any thread and choose **New thread in this project** to do the same
+from the list. Shift+click on **New thread** is a shortcut for the current project.
+
+## Pinning
+
 Pin a thread from its context menu to keep it in the pinned section above your active work.
 Pinned threads are shown independently of their project, including when you connect to more than
 one environment.

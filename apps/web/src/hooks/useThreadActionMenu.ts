@@ -187,6 +187,16 @@ export function useThreadActionMenu(input: {
           }
         };
         switch (action) {
+          case "new-thread-in-project": {
+            // Same project, default workspace options (no branch carry-over).
+            const result = await settlePromise(() =>
+              handleNewThread(scopeProjectRef(threadRef.environmentId, thread.projectId)),
+            );
+            if (result._tag === "Failure") {
+              failureToast("Could not create thread", squashAtomCommandFailure(result));
+            }
+            return;
+          }
           case "new-thread-on-branch": {
             // Explicit branch carry-over: reuse the thread's worktree when it
             // has one, otherwise its branch on the local checkout.

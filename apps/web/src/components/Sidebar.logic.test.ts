@@ -834,6 +834,64 @@ describe("sortThreadsForSidebar", () => {
 
     expect(sorted.map((thread) => thread.id)).toEqual(["newest", "stale-stamp"]);
   });
+
+  it("recent activity order lifts the thread with the latest user message", () => {
+    const sorted = sortThreadsForSidebar(
+      [
+        {
+          id: "old-but-active",
+          createdAt: "2026-03-09T08:00:00.000Z",
+          latestUserMessageAt: "2026-03-09T14:00:00.000Z",
+        },
+        sortable({ id: "newest", createdAt: "2026-03-09T12:00:00.000Z" }),
+        {
+          id: "middle",
+          createdAt: "2026-03-09T10:00:00.000Z",
+          latestUserMessageAt: "2026-03-09T11:00:00.000Z",
+        },
+      ],
+      "updated_at",
+    );
+
+    expect(sorted.map((thread) => thread.id)).toEqual(["old-but-active", "newest", "middle"]);
+  });
+
+  it("recent activity order still honors a newer un-settle stamp", () => {
+    const sorted = sortThreadsForSidebar(
+      [
+        {
+          id: "unsettled",
+          createdAt: "2026-03-09T08:00:00.000Z",
+          latestUserMessageAt: "2026-03-09T09:00:00.000Z",
+          unsettledAt: "2026-03-09T15:00:00.000Z",
+        },
+        {
+          id: "messaged",
+          createdAt: "2026-03-09T10:00:00.000Z",
+          latestUserMessageAt: "2026-03-09T14:00:00.000Z",
+        },
+      ],
+      "updated_at",
+    );
+
+    expect(sorted.map((thread) => thread.id)).toEqual(["unsettled", "messaged"]);
+  });
+
+  it("creation order ignores user message activity", () => {
+    const sorted = sortThreadsForSidebar(
+      [
+        {
+          id: "old-but-active",
+          createdAt: "2026-03-09T08:00:00.000Z",
+          latestUserMessageAt: "2026-03-09T14:00:00.000Z",
+        },
+        sortable({ id: "newest", createdAt: "2026-03-09T12:00:00.000Z" }),
+      ],
+      "created_at",
+    );
+
+    expect(sorted.map((thread) => thread.id)).toEqual(["newest", "old-but-active"]);
+  });
 });
 
 describe("pinOrderKeyBetween", () => {

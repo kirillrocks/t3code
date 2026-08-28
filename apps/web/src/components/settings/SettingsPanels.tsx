@@ -159,6 +159,11 @@ const TIMESTAMP_FORMAT_LABELS = {
   "24-hour": "24-hour",
 } as const;
 
+const ACTIVE_THREAD_SORT_LABELS = {
+  created_at: "Created",
+  updated_at: "Recent activity",
+} as const;
+
 const BACKGROUND_ACTIVITY_PROFILE_LABELS: Record<BackgroundActivityProfile, string> = {
   balanced: "Balanced",
   performance: "Performance",
@@ -1942,6 +1947,49 @@ export function GeneralSettingsPanel() {
               }}
               aria-label="Project grouping"
             />
+          }
+        />
+
+        <SettingsRow
+          {...searchableSetting("sort-active-threads")}
+          description="Created keeps the list still while agents work. Recent activity moves a thread to the top when you send it a message."
+          resetAction={
+            settings.sidebarActiveThreadSortOrder !==
+            DEFAULT_UNIFIED_SETTINGS.sidebarActiveThreadSortOrder ? (
+              <SettingResetButton
+                label="active thread sort"
+                onClick={() =>
+                  updateSettings({
+                    sidebarActiveThreadSortOrder:
+                      DEFAULT_UNIFIED_SETTINGS.sidebarActiveThreadSortOrder,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={settings.sidebarActiveThreadSortOrder}
+              onValueChange={(value) => {
+                if (value === "created_at" || value === "updated_at") {
+                  updateSettings({ sidebarActiveThreadSortOrder: value });
+                }
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-40" aria-label="Sort active threads">
+                <SelectValue>
+                  {ACTIVE_THREAD_SORT_LABELS[settings.sidebarActiveThreadSortOrder]}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="created_at">
+                  {ACTIVE_THREAD_SORT_LABELS.created_at}
+                </SelectItem>
+                <SelectItem hideIndicator value="updated_at">
+                  {ACTIVE_THREAD_SORT_LABELS.updated_at}
+                </SelectItem>
+              </SelectPopup>
+            </Select>
           }
         />
 

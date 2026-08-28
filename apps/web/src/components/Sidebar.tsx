@@ -35,6 +35,7 @@ import type { TimestampFormat } from "@t3tools/contracts/settings";
 import {
   AlarmClockIcon,
   AlarmClockOffIcon,
+  ArrowUpDownIcon,
   CheckIcon,
   ChevronDownIcon,
   CircleAlertIcon,
@@ -101,8 +102,8 @@ import { useThreadSelectionStore } from "../threadSelectionStore";
 import { useThreadActions } from "../hooks/useThreadActions";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { openCommandPalette } from "../commandPaletteBus";
-import { startNewThreadFromContext } from "../lib/chatThreadActions";
-import { useClientSettings } from "../hooks/useSettings";
+import { resolveThreadActionProjectRef, startNewThreadFromContext } from "../lib/chatThreadActions";
+import { useClientSettings, useUpdateClientSettings } from "../hooks/useSettings";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import { useNowMinute } from "../hooks/useNowMinute";
@@ -177,7 +178,16 @@ import { useThreadRunningTerminalIds } from "../state/terminalSessions";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
-import { Menu, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "./ui/menu";
+import {
+  Menu,
+  MenuGroup,
+  MenuGroupLabel,
+  MenuItem,
+  MenuPopup,
+  MenuRadioGroup,
+  MenuRadioItem,
+  MenuTrigger,
+} from "./ui/menu";
 import { SidebarContent, SidebarGroup, SidebarMenuButton, useSidebar } from "./ui/sidebar";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { Popover, PopoverPopup, PopoverTrigger } from "./ui/popover";
@@ -1233,7 +1243,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     return (
       <li
         data-thread-item
-        className="list-none [content-visibility:auto] [contain-intrinsic-size:auto_34px]"
+        className="list-none [content-visibility:auto] [contain-intrinsic-size:auto_30px]"
       >
         <Tooltip>
           <TooltipTrigger
@@ -1243,7 +1253,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 tabIndex={0}
                 data-testid="sidebar-row-slim"
                 aria-busy={isRegeneratingTitle || undefined}
-                className={cn(rowSurfaceClassName, "flex h-9 items-center gap-2.5 px-2.5")}
+                className={cn(rowSurfaceClassName, "flex h-[1.875rem] items-center gap-2 px-2.5")}
                 onClick={handleClick}
                 onDoubleClick={handleDoubleClick}
                 onKeyDown={handleKeyDown}
@@ -1268,6 +1278,15 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 fallbackIcon={MessageSquareIcon}
               />
             </span>
+            {/* Slim rows used to identify their project by favicon alone,
+              which fails whenever the icon doesn't resolve (every such row
+              gets the same fallback glyph). Shrinks before the title does:
+              the title is what identifies the row. */}
+            {props.projectTitle ? (
+              <span className="min-w-6 shrink truncate text-xs text-muted-foreground/70 group-hover/sidebar-row:text-muted-foreground">
+                {props.projectTitle}
+              </span>
+            ) : null}
             {title}
             {pinIndicator}
             {terminalStatusIcon}
@@ -1392,7 +1411,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       }
       {...(sortable?.listeners ?? {})}
       className={cn(
-        "list-none py-0.5 [content-visibility:auto] [contain-intrinsic-size:auto_96px]",
+        "list-none py-px [content-visibility:auto] [contain-intrinsic-size:auto_80px]",
         sortable?.isDragging && "z-20 opacity-80",
       )}
     >
@@ -1412,7 +1431,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             />
           }
         >
-          <div className="relative z-10 h-[4.875rem] px-[var(--sidebar-row-content-inset)] py-[var(--sidebar-content-inset)]">
+          <div className="relative z-10 h-[4.125rem] px-[var(--sidebar-row-content-inset)] py-1.5">
             <div className="flex h-5 min-w-0 items-center gap-1.5">
               <ProjectFavicon
                 environmentId={thread.environmentId}
@@ -1420,11 +1439,15 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 faviconPath={props.projectFaviconPath}
                 className="size-4 shrink-0"
               />
+              {/* The project is the first thing to scan for in a flat list,
+                  so it reads at near-title strength instead of as metadata. */}
               {props.projectTitle ? (
                 <span
                   className={cn(
-                    "min-w-0 flex-1 truncate text-secondary-label text-xs",
-                    shouldRecede ? "font-normal" : "font-medium",
+                    "min-w-0 flex-1 truncate text-xs",
+                    shouldRecede
+                      ? "font-normal text-secondary-label"
+                      : "font-semibold text-foreground/85",
                   )}
                 >
                   {props.projectTitle}
@@ -1540,7 +1563,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 ) : null}
               </span>
             </div>
-            <div className="mt-1 flex min-w-0">
+            <div className="mt-0.5 flex min-w-0">
               {title}
               {isRegeneratingTitle ? (
                 <span role="status" className="sr-only">
@@ -1732,6 +1755,8 @@ export default function Sidebar() {
   const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete);
   const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive);
   const sidebarProjectSortOrder = useClientSettings((s) => s.sidebarProjectSortOrder);
+  const sidebarActiveThreadSortOrder = useClientSettings((s) => s.sidebarActiveThreadSortOrder);
+  const updateClientSettings = useUpdateClientSettings();
   const timestampFormat = useClientSettings((s) => s.timestampFormat);
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const {
@@ -2096,7 +2121,7 @@ export default function Sidebar() {
           )
           .map((thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))),
       ),
-      activeThreads: sortThreadsForSidebar(active),
+      activeThreads: sortThreadsForSidebar(active, sidebarActiveThreadSortOrder),
       // Soonest wake first: "what comes back next" is the shelf's question.
       snoozedThreads: snoozed.toSorted(
         (left, right) =>
@@ -2111,6 +2136,7 @@ export default function Sidebar() {
     autoSettleOnMerge,
     changeRequestSnapshotByKey,
     nowMinute,
+    sidebarActiveThreadSortOrder,
     scopedProjectKeys,
     serverConfigs,
     snoozeWakeTick,
@@ -3105,6 +3131,23 @@ export default function Sidebar() {
           return;
         }
         switch (clicked.value) {
+          case "new-thread-in-project": {
+            // Same project, default workspace options (no branch carry-over).
+            const result = await settlePromise(() =>
+              handleNewThreadRef.current(scopeProjectRef(thread.environmentId, thread.projectId)),
+            );
+            if (result._tag === "Failure") {
+              const error = squashAtomCommandFailure(result);
+              toastManager.add(
+                stackedThreadToast({
+                  type: "error",
+                  title: "Could not create thread",
+                  description: error instanceof Error ? error.message : "An error occurred.",
+                }),
+              );
+            }
+            return;
+          }
           case "new-thread-on-branch": {
             // Explicit branch carry-over: reuse the thread's worktree when it
             // has one, otherwise its branch on the local checkout.
@@ -3388,6 +3431,39 @@ export default function Sidebar() {
     shortcutLabelForCommand(keybindings, "chat.new") ??
     (projectGroups.length <= 1 ? shortcutLabelForCommand(keybindings, "chat.newLocal") : undefined);
   const newThreadInProjectShortcutLabel = shortcutLabelForCommand(keybindings, "chat.newLocal");
+  // The project a plain "new thread" would land in (the thread you're
+  // viewing, else the top project), so the dropdown can name it.
+  const newThreadProjectGroup = useMemo(() => {
+    const projectRef = resolveThreadActionProjectRef({
+      activeDraftThread: newThreadContext.activeDraftThread,
+      activeThread: newThreadContext.activeThread ?? undefined,
+      defaultProjectRef: newThreadContext.defaultProjectRef,
+      handleNewThread: newThreadContext.handleNewThread,
+    });
+    if (!projectRef) return null;
+    return (
+      projectGroups.find((group) =>
+        group.memberProjectRefs.some(
+          (ref) =>
+            ref.environmentId === projectRef.environmentId &&
+            ref.projectId === projectRef.projectId,
+        ),
+      ) ?? null
+    );
+  }, [newThreadContext, projectGroups]);
+  const handleNewThreadInCurrentProject = useCallback(() => {
+    if (isMobile) setOpenMobile(false);
+    void startNewThreadFromContext({
+      activeDraftThread: newThreadContext.activeDraftThread,
+      activeThread: newThreadContext.activeThread ?? undefined,
+      defaultProjectRef: newThreadContext.defaultProjectRef,
+      handleNewThread: newThreadContext.handleNewThread,
+    });
+  }, [isMobile, newThreadContext, setOpenMobile]);
+  const handleNewThreadPickProject = useCallback(() => {
+    if (isMobile) setOpenMobile(false);
+    openCommandPalette({ open: "new-thread-in" });
+  }, [isMobile, setOpenMobile]);
   return (
     <>
       <SidebarChromeHeader isElectron={isElectron} />
@@ -3487,6 +3563,39 @@ export default function Sidebar() {
                   </TooltipPopup>
                 </Tooltip>
               </div>
+              {newThreadProjectGroup ? (
+                <Menu>
+                  <MenuTrigger
+                    aria-label="New thread options"
+                    className="inline-flex h-8 w-5 shrink-0 cursor-pointer items-center justify-center rounded-[var(--control-radius)] text-[var(--sidebar-icon-color)] outline-none transition-colors hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar data-[popup-open]:bg-sidebar-row-hover data-[popup-open]:text-sidebar-foreground"
+                  >
+                    <ChevronDownIcon className="size-3.5" />
+                  </MenuTrigger>
+                  <MenuPopup align="end" className="min-w-56">
+                    <MenuItem
+                      closeOnClick
+                      onClick={handleNewThreadInCurrentProject}
+                      className="gap-2"
+                    >
+                      <ProjectFavicon
+                        environmentId={newThreadProjectGroup.environmentId}
+                        cwd={newThreadProjectGroup.workspaceRoot}
+                        faviconPath={newThreadProjectGroup.faviconPath}
+                        className="size-4 shrink-0"
+                      />
+                      <span className="min-w-0 truncate">
+                        New thread in {newThreadProjectGroup.displayName}
+                      </span>
+                    </MenuItem>
+                    {projectGroups.length > 1 ? (
+                      <MenuItem closeOnClick onClick={handleNewThreadPickProject} className="gap-2">
+                        <FolderIcon className="size-4 shrink-0" />
+                        <span className="min-w-0 truncate">New thread in another project…</span>
+                      </MenuItem>
+                    ) : null}
+                  </MenuPopup>
+                </Menu>
+              ) : null}
             </div>
             {projectGroups.length > 0 ? (
               <div className="flex items-center gap-1">
@@ -3562,6 +3671,45 @@ export default function Sidebar() {
                         );
                       })}
                     </MenuRadioGroup>
+                  </MenuPopup>
+                </Menu>
+                <Menu>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <MenuTrigger
+                          aria-label="Sort active threads"
+                          className="inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-[var(--control-radius)] text-[var(--sidebar-icon-color)] outline-none transition-colors hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar data-[popup-open]:bg-sidebar-row-hover data-[popup-open]:text-sidebar-foreground"
+                        />
+                      }
+                    >
+                      <ArrowUpDownIcon className="size-4" />
+                    </TooltipTrigger>
+                    <TooltipPopup side="right">
+                      {sidebarActiveThreadSortOrder === "updated_at"
+                        ? "Sorted by recent activity"
+                        : "Sorted by creation time"}
+                    </TooltipPopup>
+                  </Tooltip>
+                  <MenuPopup align="end" className="min-w-48">
+                    <MenuGroup>
+                      <MenuGroupLabel>Sort active threads</MenuGroupLabel>
+                      <MenuRadioGroup
+                        value={sidebarActiveThreadSortOrder}
+                        onValueChange={(value) => {
+                          if (value === "created_at" || value === "updated_at") {
+                            updateClientSettings({ sidebarActiveThreadSortOrder: value });
+                          }
+                        }}
+                      >
+                        <MenuRadioItem value="created_at" closeOnClick>
+                          Created
+                        </MenuRadioItem>
+                        <MenuRadioItem value="updated_at" closeOnClick>
+                          Recent activity
+                        </MenuRadioItem>
+                      </MenuRadioGroup>
+                    </MenuGroup>
                   </MenuPopup>
                 </Menu>
                 <Tooltip>
