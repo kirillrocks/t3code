@@ -6111,6 +6111,14 @@ function ChatViewContent(props: ChatViewProps) {
     },
     [dispatchComposerQueueEntry],
   );
+  const onSendQueuedHeadNow = useCallback((): boolean => {
+    const head = composerQueueEntries.find(
+      (entry) => entry.status !== "sending" && entry.pendingImages !== true,
+    );
+    if (!head) return false;
+    void dispatchComposerQueueEntry(head.id);
+    return true;
+  }, [composerQueueEntries, dispatchComposerQueueEntry]);
   const onEditQueued = useCallback((entry: ComposerQueueEntry) => {
     composerRef.current?.restoreQueueEntry(entry);
   }, []);
@@ -7228,6 +7236,7 @@ function ChatViewContent(props: ChatViewProps) {
                             composerElementContextsRef={composerElementContextsRef}
                             onSend={onSend}
                             onInterrupt={onInterrupt}
+                            onSendQueuedHeadNow={onSendQueuedHeadNow}
                             onImplementPlanInNewThread={onImplementPlanInNewThread}
                             onRespondToApproval={onRespondToApproval}
                             onSelectActivePendingUserInputOption={

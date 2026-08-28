@@ -30,6 +30,7 @@ import {
   readThreadShell,
 } from "../state/entities";
 import { readLocalApi } from "../localApi";
+import { continueThreadInNewDraft } from "../threadContinuation";
 import { useUiStateStore } from "../uiStateStore";
 import { useCopyToClipboard } from "./useCopyToClipboard";
 import { useNewThreadHandler } from "./useHandleNewThread";
@@ -126,6 +127,7 @@ export function useThreadActionMenu(input: {
         const snoozePresets = resolveSnoozePresets(now, timestampFormat);
         const items = buildThreadActionMenuItems({
           branch: thread.branch ?? null,
+          hasConversation: thread.latestUserMessageAt !== null,
           isPinned: thread.pinnedAt != null,
           isSettled:
             supports.settlement &&
@@ -195,6 +197,28 @@ export function useThreadActionMenu(input: {
             if (result._tag === "Failure") {
               failureToast("Could not create thread", squashAtomCommandFailure(result));
             }
+            return;
+          }
+          case "continue-in-new-thread": {
+            const result = await continueThreadInNewDraft({
+              threadRef,
+              createDraft: () =>
+                handleNewThread(scopeProjectRef(threadRef.environmentId, thread.projectId), {
+                  branch: thread.branch,
+                  worktreePath: thread.worktreePath,
+                  envMode: thread.worktreePath ? "worktree" : "local",
+                  startFromOrigin: false,
+                }),
+            });
+            if (!result.ok) {
+              failureToast("Could not continue thread", result.error);
+              return;
+            }
+            toastManager.add({
+              type: "success",
+              title: "Conversation context added",
+              description: "Choose any provider, edit the handoff if needed, then send.",
+            });
             return;
           }
           case "new-thread-on-branch": {

@@ -72,7 +72,9 @@ export const ComposerQueuePanel = memo(function ComposerQueuePanel(props: {
             </Button>
           </>
         ) : (
-          <span className="hidden sm:inline">Ctrl+Enter sends now</span>
+          <span className="hidden sm:inline">
+            Ctrl+Enter sends now (with an empty composer, it sends the first one here)
+          </span>
         )}
         <Button
           size="micro"

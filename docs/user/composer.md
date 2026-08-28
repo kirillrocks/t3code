@@ -17,7 +17,8 @@ queue shows above the composer, one line per message, in send order. When the ag
 Code sends the first queued message as a new turn, waits for that turn to finish, then sends the
 next one.
 
-- **Ctrl+Enter** (Cmd+Enter on macOS) sends right away, into the running turn.
+- **Ctrl+Enter** (Cmd+Enter on macOS) sends right away, into the running turn. With an empty
+  composer, Ctrl+Enter sends the first queued message right away instead.
 - Hover a queued message for **Send now**, **Edit** (moves it back into the composer), and
   **Remove**. **Clear** empties the queue.
 - **Stop** pauses the queue. Choose **Resume**, or send a message by hand, to continue.

@@ -112,6 +112,7 @@ import { useProjects, useThreadShells } from "../state/entities";
 import { environmentServerConfigsAtom, primaryServerKeybindingsAtom } from "../state/server";
 import { vcsEnvironment } from "../state/vcs";
 import { threadEnvironment } from "../state/threads";
+import { continueThreadInNewDraft } from "../threadContinuation";
 import { useEnvironmentQuery } from "../state/query";
 import { useAtomCommand } from "../state/use-atom-command";
 import {
@@ -3090,6 +3091,7 @@ export default function Sidebar() {
           api.contextMenu.show(
             buildThreadActionMenuItems({
               branch: thread.branch ?? null,
+              hasConversation: thread.latestUserMessageAt !== null,
               isPinned,
               isSettled,
               isSnoozed,
@@ -3132,6 +3134,38 @@ export default function Sidebar() {
                 }),
               );
             }
+            return;
+          }
+          case "continue-in-new-thread": {
+            const result = await continueThreadInNewDraft({
+              threadRef,
+              createDraft: () =>
+                handleNewThreadRef.current(
+                  scopeProjectRef(thread.environmentId, thread.projectId),
+                  {
+                    branch: thread.branch,
+                    worktreePath: thread.worktreePath,
+                    envMode: thread.worktreePath ? "worktree" : "local",
+                    startFromOrigin: false,
+                  },
+                ),
+            });
+            if (!result.ok) {
+              toastManager.add(
+                stackedThreadToast({
+                  type: "error",
+                  title: "Could not continue thread",
+                  description:
+                    result.error instanceof Error ? result.error.message : "An error occurred.",
+                }),
+              );
+              return;
+            }
+            toastManager.add({
+              type: "success",
+              title: "Conversation context added",
+              description: "Choose any provider, edit the handoff if needed, then send.",
+            });
             return;
           }
           case "new-thread-on-branch": {

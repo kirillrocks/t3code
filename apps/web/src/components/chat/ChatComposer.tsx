@@ -642,6 +642,8 @@ export interface ChatComposerProps {
   // Callbacks
   onSend: (e?: { preventDefault: () => void }, intent?: ComposerSubmissionIntent) => void;
   onInterrupt: () => void;
+  /** Ctrl/Cmd+Enter on an empty composer: send the first queued message now. Returns false when nothing is queued. */
+  onSendQueuedHeadNow: () => boolean;
   onImplementPlanInNewThread: () => void;
   onRespondToApproval: (
     requestId: ApprovalRequestId,
@@ -730,6 +732,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     composerElementContextsRef,
     onSend,
     onInterrupt,
+    onSendQueuedHeadNow,
     onImplementPlanInNewThread,
     onRespondToApproval,
     onSelectActivePendingUserInputOption,
@@ -2113,6 +2116,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         onSelectComposerItem(selectedItem);
         return true;
       }
+    }
+    // Empty composer + Mod+Enter: push the first queued message out now.
+    if (
+      key === "Enter" &&
+      (event.metaKey || event.ctrlKey) &&
+      !event.shiftKey &&
+      routeKind === "server" &&
+      !composerSendState.hasSendableContent &&
+      onSendQueuedHeadNow()
+    ) {
+      return true;
     }
     const submissionIntent =
       key === "Enter"

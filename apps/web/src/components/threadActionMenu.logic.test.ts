@@ -4,6 +4,7 @@ import { buildThreadActionMenuItems, type ThreadActionMenuState } from "./thread
 
 const baseState: ThreadActionMenuState = {
   branch: null,
+  hasConversation: true,
   isPinned: false,
   isSettled: false,
   isSnoozed: false,
@@ -33,13 +34,22 @@ describe("buildThreadActionMenuItems", () => {
         ...baseState,
         supports: { settlement: false, snooze: false, pinning: false, titleRegeneration: false },
       }),
-    ).toEqual(["new-thread-in-project", "rename", "mark-unread", "copy", "archive", "delete"]);
+    ).toEqual([
+      "new-thread-in-project",
+      "continue-in-new-thread",
+      "rename",
+      "mark-unread",
+      "copy",
+      "archive",
+      "delete",
+    ]);
   });
 
   it("always offers a new thread in the same project", () => {
     expect(ids(baseState)[0]).toBe("new-thread-in-project");
-    expect(ids({ ...baseState, branch: "feat/menu" }).slice(0, 2)).toEqual([
+    expect(ids({ ...baseState, branch: "feat/menu" }).slice(0, 3)).toEqual([
       "new-thread-in-project",
+      "continue-in-new-thread",
       "new-thread-on-branch",
     ]);
   });
@@ -72,6 +82,20 @@ describe("buildThreadActionMenuItems", () => {
       (candidate) => candidate.id === "regenerate-title",
     );
     expect(item).toMatchObject({ label: "Regenerating…", disabled: true });
+  });
+
+  it("disables continuation without settled conversation context", () => {
+    const withoutMessages = buildThreadActionMenuItems({
+      ...baseState,
+      hasConversation: false,
+    }).find((candidate) => candidate.id === "continue-in-new-thread");
+    const whileRunning = buildThreadActionMenuItems({
+      ...baseState,
+      isRunning: true,
+    }).find((candidate) => candidate.id === "continue-in-new-thread");
+
+    expect(withoutMessages?.disabled).toBe(true);
+    expect(whileRunning?.disabled).toBe(true);
   });
 
   it("marks delete as destructive and keeps it last", () => {

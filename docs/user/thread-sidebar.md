@@ -17,6 +17,17 @@ Click the arrow beside **New thread** to start a thread in the project you are v
 another project. Right-click any thread and choose **New thread in this project** to do the same
 from the list. Shift+click on **New thread** is a shortcut for the current project.
 
+## Continue in a new thread
+
+On web and desktop, open a thread's context menu and choose **Continue in new thread** to put its
+recent completed conversation into a fresh, editable draft. The draft stays in the same workspace
+and initially keeps the source provider, model, permission mode, and interaction mode. Choose any
+other configured provider before sending to hand the work to a different coding harness.
+
+This is a portable conversation handoff, not a copy of the provider's private session state. Tool
+state and image data do not transfer; attachment names remain in the handoff so you know what may
+need to be attached again.
+
 ## Pinning
 
 Pin a thread from its context menu to keep it in the pinned section above your active work.
