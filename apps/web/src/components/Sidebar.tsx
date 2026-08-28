@@ -1410,7 +1410,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       }
       {...(sortable?.listeners ?? {})}
       className={cn(
-        "list-none py-0.5 [content-visibility:auto] [contain-intrinsic-size:auto_66px]",
+        "list-none py-0.5 [content-visibility:auto] [contain-intrinsic-size:auto_68px]",
         sortable?.isDragging && "z-20 opacity-80",
       )}
     >
@@ -1430,7 +1430,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             />
           }
         >
-          <div className="relative z-10 h-[2.875rem] px-[var(--sidebar-row-content-inset)] py-[var(--sidebar-content-inset)]">
+          <div className="relative z-10 px-[var(--sidebar-row-content-inset)] py-[var(--sidebar-content-inset)]">
             <div className="flex h-5 min-w-0 items-center gap-1.5">
               <ProjectFavicon
                 environmentId={thread.environmentId}
@@ -1456,7 +1456,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               )}
               <span
                 aria-hidden
-                className="pointer-events-none inline-flex shrink-0 items-center gap-1"
+                className="pointer-events-none inline-flex h-5 shrink-0 items-center gap-1"
               >
                 {isRemote ? (
                   <span className="inline-flex shrink-0 items-center text-sidebar-muted-foreground/70">
