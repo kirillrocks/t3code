@@ -386,6 +386,8 @@ import {
 } from "../composerQueueStore";
 import { ComposerQueuePanel } from "./chat/ComposerQueuePanel";
 import { useComposerQueueDispatcher } from "../composerQueue/useComposerQueueDispatcher";
+import { continueThreadInNewDraft } from "../threadContinuation";
+import { useThreadHandoffSummary } from "../hooks/useThreadHandoffSummary";
 import { compressImageForStash } from "../lib/imageCompression";
 import { partitionStashAttachments } from "../promptStashStore";
 import { Button } from "./ui/button";
@@ -6111,6 +6113,44 @@ function ChatViewContent(props: ChatViewProps) {
     },
     [dispatchComposerQueueEntry],
   );
+  const summarizeThreadForHandoff = useThreadHandoffSummary();
+  const handleContinueInNewThread = useCallback(() => {
+    if (!activeThread || !isServerThread) return;
+    const sourceThread = activeThread;
+    const threadRef = scopeThreadRef(sourceThread.environmentId, sourceThread.id);
+    void (async () => {
+      const result = await continueThreadInNewDraft({
+        threadRef,
+        summarize: () => summarizeThreadForHandoff(threadRef),
+        createDraft: () =>
+          handleNewThread(scopeProjectRef(sourceThread.environmentId, sourceThread.projectId), {
+            branch: sourceThread.branch,
+            worktreePath: sourceThread.worktreePath,
+            envMode: sourceThread.worktreePath ? "worktree" : "local",
+            startFromOrigin: false,
+          }),
+      });
+      if (!result.ok) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not continue thread",
+            description:
+              result.error instanceof Error ? result.error.message : "An error occurred.",
+          }),
+        );
+        return;
+      }
+      toastManager.add({
+        type: "success",
+        title: result.mode === "summary" ? "Summary ready" : "Conversation pasted in",
+        description:
+          result.mode === "summary"
+            ? "Pick a provider or account, edit if needed, then send."
+            : "The summary model was not available, so the recent messages were pasted instead.",
+      });
+    })();
+  }, [activeThread, handleNewThread, isServerThread, summarizeThreadForHandoff]);
   const onSendQueuedHeadNow = useCallback((): boolean => {
     const head = composerQueueEntries.find(
       (entry) => entry.status !== "sending" && entry.pendingImages !== true,
@@ -7001,6 +7041,7 @@ function ChatViewContent(props: ChatViewProps) {
             rightPanelOpen={rightPanelOpen}
             gitCwd={gitCwd}
             onNewThreadInProject={handleNewThreadInActiveProject}
+            onContinueInNewThread={handleContinueInNewThread}
             onRunProjectScript={runProjectScript}
             onAddProjectScript={saveProjectScript}
             onUpdateProjectScript={updateProjectScript}

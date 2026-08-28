@@ -19,18 +19,17 @@ from the list. Shift+click on **New thread** is a shortcut for the current proje
 
 ## Continue in a new thread
 
-On web and desktop, open a thread's context menu and choose **Continue in new thread** to put its
-recent completed conversation into a fresh, editable draft. The draft stays in the same workspace
-and initially keeps the source provider, model, permission mode, and interaction mode. Choose any
-other configured provider before sending to hand the work to a different coding harness.
+Use this when an account hits its limit, or when you want to move the work to another provider.
+Click the **Continue in new thread** button in the chat header, or choose it from a thread's context
+menu. T3 Code opens a new draft in the same workspace and asks its text-generation model (the same
+cheap model that writes thread titles, set under Settings → General) to write a short summary of the
+conversation: the goal, what was done, what is left, and the rules you gave. The draft starts with
+"We continue a conversation from another thread" and that summary. Pick any provider or account in
+the draft, edit the text if you like, then send.
 
-When you have more than one provider or account set up, the item opens a submenu: **Same provider**,
-or **With …** for each other provider. Pick an account there when the current one hit its limit; the
-draft is already set to that account, so you only press send.
-
-This is a portable conversation handoff, not a copy of the provider's private session state. Tool
-state and image data do not transfer; attachment names remain in the handoff so you know what may
-need to be attached again.
+The summary takes a few seconds. If the summary model is not available, the recent messages are
+pasted in instead. Tool state and images do not transfer; attachment names are listed so you know
+what to attach again.
 
 ## Pinning
 

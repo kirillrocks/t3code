@@ -30,6 +30,7 @@ export const ORCHESTRATION_WS_METHODS = {
   getTurnDiff: "orchestration.getTurnDiff",
   getFullThreadDiff: "orchestration.getFullThreadDiff",
   searchThreads: "orchestration.searchThreads",
+  generateThreadHandoff: "orchestration.generateThreadHandoff",
   getArchivedShellSnapshot: "orchestration.getArchivedShellSnapshot",
   subscribeShell: "orchestration.subscribeShell",
   subscribeThread: "orchestration.subscribeThread",
@@ -1707,6 +1708,23 @@ export class OrchestrationGetWorkflowScriptError extends Schema.TaggedErrorClass
   }
 }
 
+/**
+ * Handoff summary: a short, model-written recap of a thread so the user can
+ * continue the work in a new thread (often on another provider or account).
+ * Uses the server's text-generation model, not the thread's agent.
+ */
+export const OrchestrationGenerateThreadHandoffInput = Schema.Struct({
+  threadId: ThreadId,
+});
+export type OrchestrationGenerateThreadHandoffInput =
+  typeof OrchestrationGenerateThreadHandoffInput.Type;
+
+export const OrchestrationGenerateThreadHandoffResult = Schema.Struct({
+  summary: Schema.String,
+});
+export type OrchestrationGenerateThreadHandoffResult =
+  typeof OrchestrationGenerateThreadHandoffResult.Type;
+
 export const OrchestrationRpcSchemas = {
   dispatchCommand: {
     input: ClientOrchestrationCommand,
@@ -1727,6 +1745,10 @@ export const OrchestrationRpcSchemas = {
   searchThreads: {
     input: OrchestrationSearchThreadsInput,
     output: OrchestrationSearchThreadsResult,
+  },
+  generateThreadHandoff: {
+    input: OrchestrationGenerateThreadHandoffInput,
+    output: OrchestrationGenerateThreadHandoffResult,
   },
   getArchivedShellSnapshot: {
     input: Schema.Struct({}),
@@ -1769,6 +1791,14 @@ export class OrchestrationGetTurnDiffError extends Schema.TaggedErrorClass<Orche
 
 export class OrchestrationGetFullThreadDiffError extends Schema.TaggedErrorClass<OrchestrationGetFullThreadDiffError>()(
   "OrchestrationGetFullThreadDiffError",
+  {
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
+
+export class OrchestrationGenerateThreadHandoffError extends Schema.TaggedErrorClass<OrchestrationGenerateThreadHandoffError>()(
+  "OrchestrationGenerateThreadHandoffError",
   {
     message: TrimmedNonEmptyString,
     cause: Schema.optional(Schema.Defect()),

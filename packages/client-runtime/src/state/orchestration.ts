@@ -1,7 +1,7 @@
 import { ORCHESTRATION_WS_METHODS } from "@t3tools/contracts";
 import { Atom } from "effect/unstable/reactivity";
 
-import { createEnvironmentRpcQueryAtomFamily } from "./runtime.ts";
+import { createEnvironmentRpcCommand, createEnvironmentRpcQueryAtomFamily } from "./runtime.ts";
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 
 export function createOrchestrationEnvironmentAtoms<R, E>(
@@ -28,6 +28,10 @@ export function createOrchestrationEnvironmentAtoms<R, E>(
       tag: ORCHESTRATION_WS_METHODS.searchThreads,
       staleTimeMs: 30_000,
       idleTtlMs: 60_000,
+    }),
+    generateThreadHandoff: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:orchestration:generate-thread-handoff",
+      tag: ORCHESTRATION_WS_METHODS.generateThreadHandoff,
     }),
     archivedShellSnapshot: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:orchestration:archived-shell-snapshot",

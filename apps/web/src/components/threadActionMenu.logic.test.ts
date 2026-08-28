@@ -5,7 +5,6 @@ import { buildThreadActionMenuItems, type ThreadActionMenuState } from "./thread
 const baseState: ThreadActionMenuState = {
   branch: null,
   hasConversation: true,
-  continueTargets: [],
   isPinned: false,
   isSettled: false,
   isSnoozed: false,
@@ -97,21 +96,6 @@ describe("buildThreadActionMenuItems", () => {
 
     expect(withoutMessages?.disabled).toBe(true);
     expect(whileRunning?.disabled).toBe(true);
-  });
-
-  it("offers other providers as a submenu when configured", () => {
-    const item = buildThreadActionMenuItems({
-      ...baseState,
-      continueTargets: [{ instanceId: "claude_personal", label: "Claude (personal)" }],
-    }).find((candidate) => candidate.id === "continue-in-new-thread");
-    expect(item?.children?.map((child) => [child.id, child.label])).toEqual([
-      ["continue-in-new-thread", "Same provider"],
-      ["continue-in-new-thread:claude_personal", "With Claude (personal)"],
-    ]);
-    expect(
-      buildThreadActionMenuItems(baseState).find((c) => c.id === "continue-in-new-thread")
-        ?.children,
-    ).toBeUndefined();
   });
 
   it("marks delete as destructive and keeps it last", () => {

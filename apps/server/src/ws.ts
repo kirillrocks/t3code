@@ -36,6 +36,7 @@ import {
   type OrchestrationThreadStreamItem,
   OrchestrationGetFullThreadDiffError,
   OrchestrationGetSnapshotError,
+  OrchestrationGenerateThreadHandoffError,
   OrchestrationSearchThreadsError,
   OrchestrationGetTurnDiffError,
   ORCHESTRATION_WS_METHODS,
@@ -97,6 +98,8 @@ import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServerSettings from "./serverSettings.ts";
+import * as TextGeneration from "./textGeneration/TextGeneration.ts";
+import { formatThreadHandoffTranscript } from "./textGeneration/ThreadHandoffContext.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as PreviewManager from "./preview/Manager.ts";
@@ -140,6 +143,9 @@ import * as SessionStore from "./auth/SessionStore.ts";
 import { failEnvironmentAuthInvalid, failEnvironmentInternal } from "./auth/http.ts";
 import * as RelayClient from "@t3tools/shared/relayClient";
 const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError);
+const isOrchestrationGenerateThreadHandoffError = Schema.is(
+  OrchestrationGenerateThreadHandoffError,
+);
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 const CONFIG_DISCOVERY_TIMEOUT = Duration.seconds(5);
@@ -506,6 +512,7 @@ const makeWsRpcLayer = (
       const config = yield* ServerConfig.ServerConfig;
       const lifecycleEvents = yield* ServerLifecycleEvents.ServerLifecycleEvents;
       const serverSettings = yield* ServerSettings.ServerSettingsService;
+      const textGeneration = yield* TextGeneration.TextGeneration;
       const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
       const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
       const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
@@ -1343,6 +1350,52 @@ const makeWsRpcLayer = (
                     message: "Failed to search threads",
                     cause,
                   }),
+              ),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.generateThreadHandoff]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.generateThreadHandoff,
+            Effect.gen(function* () {
+              const thread = yield* projectionSnapshotQuery
+                .getThreadDetailById(input.threadId)
+                .pipe(Effect.map(Option.getOrUndefined));
+              if (!thread) {
+                return yield* new OrchestrationGenerateThreadHandoffError({
+                  message: "Thread not found.",
+                });
+              }
+              const transcript = formatThreadHandoffTranscript(thread.messages);
+              if (transcript.length === 0) {
+                return yield* new OrchestrationGenerateThreadHandoffError({
+                  message: "The thread has no conversation to summarize yet.",
+                });
+              }
+              const project = yield* projectionSnapshotQuery
+                .getProjectShellById(thread.projectId)
+                .pipe(Effect.map(Option.getOrUndefined));
+              const cwd = thread.worktreePath ?? project?.workspaceRoot ?? process.cwd();
+              const { textGenerationModelSelection: modelSelection } =
+                yield* serverSettings.getSettings;
+              const generated = yield* textGeneration.generateThreadHandoff({
+                cwd,
+                title: thread.title,
+                transcript,
+                modelSelection,
+              });
+              return { summary: generated.summary };
+            }).pipe(
+              Effect.mapError((cause) =>
+                isOrchestrationGenerateThreadHandoffError(cause)
+                  ? cause
+                  : new OrchestrationGenerateThreadHandoffError({
+                      message:
+                        cause instanceof Error && cause.message.trim().length > 0
+                          ? cause.message
+                          : "Failed to summarize the thread.",
+                      cause,
+                    }),
               ),
             ),
             { "rpc.aggregate": "orchestration" },

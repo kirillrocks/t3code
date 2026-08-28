@@ -11,7 +11,7 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import type { ChangeRequestSettleSource } from "@t3tools/client-runtime/state/thread-settled";
-import { ChevronDownIcon } from "lucide-react";
+import { ChevronDownIcon, MessageSquarePlusIcon } from "lucide-react";
 import {
   memo,
   useCallback,
@@ -67,6 +67,8 @@ interface ChatHeaderProps {
   gitCwd: string | null;
   readonly onOpenPullRequest?: ((number: number) => void) | undefined;
   onNewThreadInProject: () => void;
+  /** Summarize this thread into a new draft (continue on any provider/account). */
+  onContinueInNewThread: () => void;
   onRunProjectScript: (script: ProjectScript) => void;
   onAddProjectScript: (input: NewProjectScriptInput) => Promise<ProjectScriptActionResult>;
   onUpdateProjectScript: (
@@ -136,6 +138,7 @@ export const ChatHeader = memo(function ChatHeader({
   gitCwd,
   onOpenPullRequest,
   onNewThreadInProject,
+  onContinueInNewThread,
   onRunProjectScript,
   onAddProjectScript,
   onUpdateProjectScript,
@@ -380,6 +383,26 @@ export const ChatHeader = memo(function ChatHeader({
           rightPanelOpen ? "pr-0" : "pr-16",
         )}
       >
+        {isServerThread ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  aria-label="Continue in new thread"
+                  onClick={onContinueInNewThread}
+                  className="inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+                />
+              }
+            >
+              <MessageSquarePlusIcon className="size-3.5" aria-hidden="true" />
+              <span className="hidden @3xl/header-actions:inline">Continue in new thread</span>
+            </TooltipTrigger>
+            <TooltipPopup side="bottom">
+              Summarize this conversation into a new thread. Pick any provider or account there.
+            </TooltipPopup>
+          </Tooltip>
+        ) : null}
         {activeProjectScripts && (
           <ProjectScriptsControl
             scripts={activeProjectScripts}

@@ -125,6 +125,7 @@ import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServiceLauncherClient from "./cloud/serviceLauncherClient.ts";
 import * as ServerSettings from "./serverSettings.ts";
+import * as TextGeneration from "./textGeneration/TextGeneration.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import * as PortScanner from "./preview/PortScanner.ts";
@@ -674,6 +675,9 @@ const buildAppUnderTest = (options?: {
           }),
           Layer.mock(RemoteOpenTargets.RemoteOpenTargets)({
             resolveTargets: () => Effect.succeed([]),
+          }),
+          Layer.mock(TextGeneration.TextGeneration)({
+            generateThreadHandoff: () => Effect.die("generateThreadHandoff not configured in test"),
           }),
         ),
       ),

@@ -316,3 +316,34 @@ export function buildThreadTitlePrompt(input: ThreadTitlePromptInput) {
 
   return { prompt, outputSchema };
 }
+
+export interface ThreadHandoffPromptInput {
+  title: string;
+  transcript: string;
+}
+
+const THREAD_HANDOFF_PROMPT = `Write a handoff summary of this T3 Code thread so another AI coding agent can continue the work in a fresh session with no other context.
+Return JSON with exactly one key: summary. The summary is Markdown.
+
+Cover, in this order, with short headings:
+- Goal: what the user wants, in one or two sentences.
+- Done so far: what was changed or decided, naming files, commands, and branches when they appear.
+- Current state: what works, what is broken, what was being worked on when the thread stopped.
+- Next steps: the concrete things still to do, most important first.
+- Constraints and preferences: rules the user gave, style choices, things to avoid.
+- Open questions: anything unresolved that the user must answer.
+
+Rules:
+- 150 to 400 words. Plain, direct sentences.
+- Only facts from the transcript. Do not invent files, results, or decisions.
+- Keep exact names: file paths, function names, branch names, error messages.
+- Do not address the user. Do not add a greeting or a closing line.`;
+
+export function buildThreadHandoffPrompt(input: ThreadHandoffPromptInput) {
+  const transcript = limitSection(input.transcript, 80_000);
+  const prompt = `${THREAD_HANDOFF_PROMPT}\n\nThread title: ${input.title}\n\nTranscript:\n${transcript}`;
+  const outputSchema = Schema.Struct({
+    summary: Schema.String,
+  });
+  return { prompt, outputSchema };
+}

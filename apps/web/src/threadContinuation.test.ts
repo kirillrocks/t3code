@@ -76,7 +76,7 @@ describe("continueThreadInNewDraft", () => {
 
     const result = await continueThreadInNewDraft({ threadRef, createDraft });
 
-    expect(result).toEqual({ ok: true });
+    expect(result).toEqual({ ok: true, mode: "transcript" });
     expect(createDraft).toHaveBeenCalledOnce();
     expect(drafts.setModelSelection).toHaveBeenCalledWith(
       draftId,
@@ -105,7 +105,7 @@ describe("continueThreadInNewDraft", () => {
       createDraft: async () => ({ draftId }),
     });
 
-    expect(result).toEqual({ ok: true });
+    expect(result).toEqual({ ok: true, mode: "transcript" });
     expect(dispose).toHaveBeenCalledOnce();
     expect(drafts.setPrompt).toHaveBeenCalledWith(
       draftId,
