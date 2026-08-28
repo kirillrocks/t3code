@@ -24,6 +24,10 @@ recent completed conversation into a fresh, editable draft. The draft stays in t
 and initially keeps the source provider, model, permission mode, and interaction mode. Choose any
 other configured provider before sending to hand the work to a different coding harness.
 
+When you have more than one provider or account set up, the item opens a submenu: **Same provider**,
+or **With …** for each other provider. Pick an account there when the current one hit its limit; the
+draft is already set to that account, so you only press send.
+
 This is a portable conversation handoff, not a copy of the provider's private session state. Tool
 state and image data do not transfer; attachment names remain in the handoff so you know what may
 need to be attached again.

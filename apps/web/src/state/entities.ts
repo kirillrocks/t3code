@@ -16,6 +16,7 @@ import type {
   ScopedProjectRef,
   ScopedThreadRef,
   ServerConfig,
+  ServerProvider,
 } from "@t3tools/contracts";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { Atom } from "effect/unstable/reactivity";
@@ -243,6 +244,13 @@ export function readEnvironmentSupportsSnooze(environmentId: EnvironmentId): boo
 
 /** Whether the environment's server understands thread.pin/unpin.
     Same version-skew contract as settlement. */
+/** Provider snapshots for one environment; empty until its config loads. */
+export function readEnvironmentProviders(
+  environmentId: EnvironmentId,
+): ReadonlyArray<ServerProvider> {
+  return appAtomRegistry.get(environmentServerConfigsAtom).get(environmentId)?.providers ?? [];
+}
+
 export function readEnvironmentSupportsPinning(environmentId: EnvironmentId): boolean {
   return (
     appAtomRegistry.get(environmentServerConfigsAtom).get(environmentId)?.environment.capabilities

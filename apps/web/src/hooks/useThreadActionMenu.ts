@@ -11,7 +11,7 @@ import {
   effectiveSnoozed,
   type ChangeRequestSettleSource,
 } from "@t3tools/client-runtime/state/thread-settled";
-import type { ScopedThreadRef, ThreadId } from "@t3tools/contracts";
+import type { ProviderInstanceId, ScopedThreadRef, ThreadId } from "@t3tools/contracts";
 import { useCallback } from "react";
 
 import { resolveSnoozePresets, snoozeWakeDescription } from "../components/Sidebar.snooze";
@@ -26,11 +26,12 @@ import {
   readEnvironmentSupportsPinning,
   readEnvironmentSupportsSettlement,
   readEnvironmentSupportsSnooze,
+  readEnvironmentProviders,
   readEnvironmentSupportsTitleRegeneration,
   readThreadShell,
 } from "../state/entities";
 import { readLocalApi } from "../localApi";
-import { continueThreadInNewDraft } from "../threadContinuation";
+import { continueThreadInNewDraft, resolveContinueThreadTargets } from "../threadContinuation";
 import { useUiStateStore } from "../uiStateStore";
 import { useCopyToClipboard } from "./useCopyToClipboard";
 import { useNewThreadHandler } from "./useHandleNewThread";
@@ -128,6 +129,10 @@ export function useThreadActionMenu(input: {
         const items = buildThreadActionMenuItems({
           branch: thread.branch ?? null,
           hasConversation: thread.latestUserMessageAt !== null,
+          continueTargets: resolveContinueThreadTargets(
+            readEnvironmentProviders(threadRef.environmentId),
+            thread.modelSelection.instanceId,
+          ),
           isPinned: thread.pinnedAt != null,
           isSettled:
             supports.settlement &&
@@ -150,6 +155,33 @@ export function useThreadActionMenu(input: {
         const clicked = await settlePromise(() => api.contextMenu.show(items, position));
         if (clicked._tag === "Failure" || clicked.value === null) return;
         const action: ThreadActionMenuId = clicked.value;
+        if (action.startsWith("continue-in-new-thread:")) {
+          const targetInstanceId = action.slice("continue-in-new-thread:".length);
+          const result = await continueThreadInNewDraft({
+            threadRef,
+            target: {
+              instanceId: targetInstanceId as ProviderInstanceId,
+              providers: readEnvironmentProviders(threadRef.environmentId),
+            },
+            createDraft: () =>
+              handleNewThread(scopeProjectRef(threadRef.environmentId, thread.projectId), {
+                branch: thread.branch,
+                worktreePath: thread.worktreePath,
+                envMode: thread.worktreePath ? "worktree" : "local",
+                startFromOrigin: false,
+              }),
+          });
+          if (!result.ok) {
+            failureToast("Could not continue thread", result.error);
+            return;
+          }
+          toastManager.add({
+            type: "success",
+            title: "Conversation context added",
+            description: "Edit the handoff if needed, then send.",
+          });
+          return;
+        }
         if (action.startsWith("snooze:")) {
           const preset = snoozePresets.find((candidate) => `snooze:${candidate.id}` === action);
           if (!preset) return;

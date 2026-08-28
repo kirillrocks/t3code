@@ -30,7 +30,7 @@ import {
   scopeThreadRef,
   scopedThreadKey,
 } from "@t3tools/client-runtime/environment";
-import type { ScopedThreadRef, ThreadId } from "@t3tools/contracts";
+import type { ProviderInstanceId, ScopedThreadRef, ThreadId } from "@t3tools/contracts";
 import type { TimestampFormat } from "@t3tools/contracts/settings";
 import {
   AlarmClockIcon,
@@ -112,7 +112,7 @@ import { useProjects, useThreadShells } from "../state/entities";
 import { environmentServerConfigsAtom, primaryServerKeybindingsAtom } from "../state/server";
 import { vcsEnvironment } from "../state/vcs";
 import { threadEnvironment } from "../state/threads";
-import { continueThreadInNewDraft } from "../threadContinuation";
+import { continueThreadInNewDraft, resolveContinueThreadTargets } from "../threadContinuation";
 import { useEnvironmentQuery } from "../state/query";
 import { useAtomCommand } from "../state/use-atom-command";
 import {
@@ -3092,6 +3092,10 @@ export default function Sidebar() {
             buildThreadActionMenuItems({
               branch: thread.branch ?? null,
               hasConversation: thread.latestUserMessageAt !== null,
+              continueTargets: resolveContinueThreadTargets(
+                serverConfigs.get(thread.environmentId)?.providers ?? [],
+                thread.modelSelection.instanceId,
+              ),
               isPinned,
               isSettled,
               isSnoozed,
@@ -3111,6 +3115,40 @@ export default function Sidebar() {
           ),
         );
         if (clicked._tag === "Failure") return;
+        if (clicked.value?.startsWith("continue-in-new-thread:")) {
+          const targetInstanceId = clicked.value.slice("continue-in-new-thread:".length);
+          const result = await continueThreadInNewDraft({
+            threadRef,
+            target: {
+              instanceId: targetInstanceId as ProviderInstanceId,
+              providers: serverConfigs.get(thread.environmentId)?.providers ?? [],
+            },
+            createDraft: () =>
+              handleNewThreadRef.current(scopeProjectRef(thread.environmentId, thread.projectId), {
+                branch: thread.branch,
+                worktreePath: thread.worktreePath,
+                envMode: thread.worktreePath ? "worktree" : "local",
+                startFromOrigin: false,
+              }),
+          });
+          if (!result.ok) {
+            toastManager.add(
+              stackedThreadToast({
+                type: "error",
+                title: "Could not continue thread",
+                description:
+                  result.error instanceof Error ? result.error.message : "An error occurred.",
+              }),
+            );
+            return;
+          }
+          toastManager.add({
+            type: "success",
+            title: "Conversation context added",
+            description: "Edit the handoff if needed, then send.",
+          });
+          return;
+        }
         if (clicked.value?.startsWith("snooze:")) {
           const preset = snoozePresets.find(
             (candidate) => `snooze:${candidate.id}` === clicked.value,

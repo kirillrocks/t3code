@@ -9,6 +9,7 @@ import type { SnoozePreset } from "@t3tools/client-runtime/state/thread-settled"
 export type ThreadActionMenuId =
   | "new-thread-in-project"
   | "continue-in-new-thread"
+  | `continue-in-new-thread:${string}`
   | "new-thread-on-branch"
   | "pin"
   | "unpin"
@@ -30,6 +31,8 @@ export type ThreadActionMenuId =
 export interface ThreadActionMenuState {
   readonly branch: string | null;
   readonly hasConversation: boolean;
+  /** Other providers/accounts to continue on; empty hides the submenu. */
+  readonly continueTargets: ReadonlyArray<{ readonly instanceId: string; readonly label: string }>;
   readonly isPinned: boolean;
   readonly isSettled: boolean;
   readonly isSnoozed: boolean;
@@ -62,12 +65,29 @@ export function buildThreadActionMenuItems(
       label: "New thread in this project",
       icon: "message-square-plus",
     },
-    {
-      id: "continue-in-new-thread",
-      label: "Continue in new thread",
-      icon: "message-square-plus",
-      disabled: !state.hasConversation || state.isRunning,
-    },
+    // Carries the recent conversation into a fresh draft. With other
+    // providers/accounts configured it becomes a submenu so a limit-hit
+    // account can hand the work straight to another one.
+    state.continueTargets.length > 0
+      ? {
+          id: "continue-in-new-thread" as const,
+          label: "Continue in new thread",
+          icon: "message-square-plus",
+          disabled: !state.hasConversation || state.isRunning,
+          children: [
+            { id: "continue-in-new-thread" as const, label: "Same provider" },
+            ...state.continueTargets.map((target) => ({
+              id: `continue-in-new-thread:${target.instanceId}` as const,
+              label: `With ${target.label}`,
+            })),
+          ],
+        }
+      : {
+          id: "continue-in-new-thread" as const,
+          label: "Continue in new thread",
+          icon: "message-square-plus",
+          disabled: !state.hasConversation || state.isRunning,
+        },
     ...(state.branch
       ? [
           {
