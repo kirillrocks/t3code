@@ -20,7 +20,8 @@ next one.
 - **Ctrl+Enter** (Cmd+Enter on macOS) sends right away, into the running turn. With an empty
   composer, Ctrl+Enter sends the first queued message right away instead.
 - Hover a queued message for **Send now**, **Edit** (moves it back into the composer), and
-  **Remove**. **Clear** empties the queue.
+  **Remove**. **Clear** empties the queue. With an empty composer, the **Up** arrow edits the newest
+  queued message.
 - **Stop** pauses the queue. Choose **Resume**, or send a message by hand, to continue.
 - A message that fails to send stays first in the queue with the reason. Send it again or remove
   it; the messages behind it wait.

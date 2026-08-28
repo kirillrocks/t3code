@@ -67,7 +67,11 @@ import {
 } from "../../promptStashStore";
 import { ComposerStashBadge } from "./ComposerStashBadge";
 import { ComposerStashMenu } from "./ComposerStashMenu";
-import { useComposerQueueStore, type ComposerQueueEntry } from "../../composerQueueStore";
+import {
+  composerQueueThreadKey,
+  useComposerQueueStore,
+  type ComposerQueueEntry,
+} from "../../composerQueueStore";
 import {
   ComposerTasksBadge,
   ComposerTasksDrawer,
@@ -2114,6 +2118,29 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       }
       if ((key === "Enter" || key === "Tab") && selectedItem) {
         onSelectComposerItem(selectedItem);
+        return true;
+      }
+    }
+    // Empty composer + ArrowUp: pull the newest queued message back to edit
+    // it, like the Edit button on its card.
+    if (
+      key === "ArrowUp" &&
+      !event.shiftKey &&
+      !event.metaKey &&
+      !event.ctrlKey &&
+      !event.altKey &&
+      routeKind === "server" &&
+      promptRef.current.trim().length === 0
+    ) {
+      const threadKey = composerQueueThreadKey(
+        props.routeThreadRef.environmentId,
+        props.routeThreadRef.threadId,
+      );
+      const newest = useComposerQueueStore
+        .getState()
+        .entries.findLast((entry) => entry.threadKey === threadKey && entry.status !== "sending");
+      if (newest) {
+        editQueueEntry(newest);
         return true;
       }
     }
