@@ -194,6 +194,10 @@ const keyboardInputFromPacket = (packet: Electron.KeyboardInputEvent): Electron.
     Escape: { key: "Escape", code: "Escape" },
     Backspace: { key: "Backspace", code: "Backspace" },
     Tab: { key: "Tab", code: "Tab" },
+    Shift: { key: "Shift", code: "ShiftLeft" },
+    Control: { key: "Control", code: "ControlLeft" },
+    Alt: { key: "Alt", code: "AltLeft" },
+    Meta: { key: "Meta", code: "MetaLeft" },
     Space: { key: " ", code: "Space" },
     Left: { key: "ArrowLeft", code: "ArrowLeft" },
     Right: { key: "ArrowRight", code: "ArrowRight" },
@@ -3372,6 +3376,7 @@ describe("PreviewManager", () => {
           { type: "char", keyCode: "x", modifiers: [] },
           { type: "keyUp", keyCode: "X", modifiers: [] },
           { type: "rawKeyDown", keyCode: "Enter", modifiers: [] },
+          { type: "char", keyCode: "\r", modifiers: [] },
           { type: "keyUp", keyCode: "Enter", modifiers: [] },
           { type: "rawKeyDown", keyCode: "Z", modifiers: ["meta"] },
           { type: "keyUp", keyCode: "Z", modifiers: ["meta"] },
@@ -3402,6 +3407,118 @@ describe("PreviewManager", () => {
         expect(methods).not.toContain("Input.dispatchKeyEvent");
         expect(methods).not.toContain("Page.bringToFront");
         expect(methods).not.toContain("Emulation.setFocusEmulationEnabled");
+      }),
+    ),
+  );
+
+  effectIt.effect("confirms both phases of named modifier presses", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        const hostSendInputEvent = vi.fn();
+        const hostWebContents = {
+          sendInputEvent: hostSendInputEvent,
+        } as unknown as Electron.WebContents;
+        const guest = makeKeyboardWebContents({ hostWebContents });
+        fromId.mockReturnValue(guest.webContents);
+        yield* manager.setMainWindow({
+          isDestroyed: () => false,
+          isFocused: () => true,
+          once: vi.fn(),
+          webContents: hostWebContents,
+        } as never);
+        yield* manager.createTab("tab_modifiers");
+        yield* manager.registerWebview("tab_modifiers", 42);
+
+        for (const key of ["Shift", "Control", "Alt", "Meta"] as const) {
+          yield* manager.automationPress("tab_modifiers", { key });
+        }
+        yield* manager.automationPress("tab_modifiers", { key: "x" });
+
+        expect(guest.sendInputEvent.mock.calls.map(([packet]) => packet)).toEqual([
+          { type: "rawKeyDown", keyCode: "Shift", modifiers: ["shift"] },
+          { type: "keyUp", keyCode: "Shift", modifiers: [] },
+          { type: "rawKeyDown", keyCode: "Control", modifiers: ["control"] },
+          { type: "keyUp", keyCode: "Control", modifiers: [] },
+          { type: "rawKeyDown", keyCode: "Alt", modifiers: ["alt"] },
+          { type: "keyUp", keyCode: "Alt", modifiers: [] },
+          { type: "rawKeyDown", keyCode: "Meta", modifiers: ["meta"] },
+          { type: "keyUp", keyCode: "Meta", modifiers: [] },
+          { type: "rawKeyDown", keyCode: "X", modifiers: [] },
+          { type: "char", keyCode: "x", modifiers: [] },
+          { type: "keyUp", keyCode: "X", modifiers: [] },
+        ]);
+        expect(guest.activity.filter((event) => event.startsWith("receipt:"))).toEqual(
+          Array.from({ length: 5 }, () => ["receipt:down", "receipt:up"]).flat(),
+        );
+        expect(guest.setIgnoreMenuShortcuts.mock.calls).toEqual(
+          Array.from({ length: 5 }, () => [[true], [false]]).flat(),
+        );
+        expect(hostSendInputEvent).not.toHaveBeenCalled();
+        expect(guest.reload).not.toHaveBeenCalled();
+      }),
+    ),
+  );
+
+  effectIt.effect("quarantines a modifier press after a wrong DOM modifier receipt", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        const hostSendInputEvent = vi.fn();
+        const hostWebContents = {
+          sendInputEvent: hostSendInputEvent,
+        } as unknown as Electron.WebContents;
+        let sentWrongReceipt = false;
+        let guest: ReturnType<typeof makeKeyboardWebContents>;
+        guest = makeKeyboardWebContents({
+          hostWebContents,
+          onSendInputEvent: (packet) => {
+            if (packet.type !== "rawKeyDown" || sentWrongReceipt) return;
+            sentWrongReceipt = true;
+            queueMicrotask(() => {
+              guest.emitHumanInput({
+                kind: "key",
+                phase: "down",
+                key: "Meta",
+                code: "MetaLeft",
+                meta: false,
+                shift: false,
+                control: false,
+                alt: false,
+              });
+            });
+          },
+        });
+        fromId.mockReturnValue(guest.webContents);
+        yield* manager.setMainWindow({
+          isDestroyed: () => false,
+          isFocused: () => true,
+          once: vi.fn(),
+          webContents: hostWebContents,
+        } as never);
+        yield* manager.createTab("tab_modifier_receipt");
+        yield* manager.registerWebview("tab_modifier_receipt", 42);
+
+        const press = yield* manager
+          .automationPress("tab_modifier_receipt", { key: "Meta" })
+          .pipe(Effect.exit, Effect.forkChild({ startImmediately: true }));
+        yield* settle(() => guest.sendInputEvent.mock.calls.length === 2);
+        yield* TestClock.adjust(0);
+        yield* TestClock.adjust(1_000);
+        expect(Exit.isFailure(yield* Fiber.join(press))).toBe(true);
+
+        const retry = yield* Effect.exit(
+          manager.automationPress("tab_modifier_receipt", { key: "x" }),
+        );
+        expect(Exit.isFailure(retry)).toBe(true);
+        if (Exit.isFailure(retry)) {
+          expect(Option.getOrThrow(Cause.findErrorOption(retry.cause))).toMatchObject({
+            _tag: "PreviewAutomationKeyboardDeliveryNotConfirmedError",
+          });
+        }
+        expect(guest.sendInputEvent).toHaveBeenCalledTimes(2);
+        expect(hostSendInputEvent).not.toHaveBeenCalled();
+
+        guest.emitNavigation();
+        expect(guest.setIgnoreMenuShortcuts.mock.calls).toEqual([[true], [false]]);
       }),
     ),
   );

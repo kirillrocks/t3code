@@ -4076,25 +4076,28 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       });
     }
     const keySequence = makePreviewAutomationKeySequence(input);
-    const makeActiveKey = (phase: "down" | "up"): ActiveAgentKey => ({
+    const makeActiveKey = (
+      phase: "down" | "up",
+      signal: typeof keySequence.keyDownSignal,
+    ): ActiveAgentKey => ({
       attachmentId: attachment.attachmentId,
       document: receiptDocument,
       id: Symbol(),
       phase,
-      signal: keySequence.signal,
+      signal,
       webContents: wc,
       accepted: false,
       valid: true,
     });
-    const keyDownMarker = makeActiveKey("down");
-    const keyUpMarker = makeActiveKey("up");
+    const keyDownMarker = makeActiveKey("down", keySequence.keyDownSignal);
+    const keyUpMarker = makeActiveKey("up", keySequence.keyUpSignal);
     attachment.pendingAgentKeys.add(keyDownMarker);
     attachment.pendingAgentKeys.add(keyUpMarker);
     const keyDownReceipt = yield* Deferred.make<void>();
     const keyUpReceipt = yield* Deferred.make<void>();
     const keyDownExpectationId = yield* expectAgentInput(
       tabId,
-      { ...keySequence.signal, phase: "down" },
+      { ...keySequence.keyDownSignal, phase: "down" },
       {
         attachmentId: attachment.attachmentId,
         nativeKey: keyDownMarker,
@@ -4103,7 +4106,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     );
     const keyUpExpectationId = yield* expectAgentInput(
       tabId,
-      { ...keySequence.signal, phase: "up" },
+      { ...keySequence.keyUpSignal, phase: "up" },
       {
         attachmentId: attachment.attachmentId,
         nativeKey: keyUpMarker,

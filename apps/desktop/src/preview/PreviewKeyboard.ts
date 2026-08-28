@@ -9,26 +9,31 @@ interface KeyDefinition {
   readonly shiftedKey?: string;
 }
 
+interface PreviewAutomationKeySignal {
+  readonly kind: "key";
+  readonly key: string;
+  readonly code: string;
+  readonly meta: boolean;
+  readonly shift: boolean;
+  readonly control: boolean;
+  readonly alt: boolean;
+}
+
 export interface PreviewAutomationKeySequence {
   readonly keyDown: KeyboardInputEvent;
   readonly char?: KeyboardInputEvent;
   readonly keyUp: KeyboardInputEvent;
-  readonly signal: {
-    readonly kind: "key";
-    readonly key: string;
-    readonly code: string;
-    readonly meta: boolean;
-    readonly shift: boolean;
-    readonly control: boolean;
-    readonly alt: boolean;
-  };
+  readonly keyDownSignal: PreviewAutomationKeySignal;
+  readonly keyUpSignal: PreviewAutomationKeySignal;
 }
+
+type PreviewAutomationModifier = "alt" | "control" | "meta" | "shift";
 
 const NAMED_KEYS: Readonly<Record<string, KeyDefinition>> = {
   Escape: { code: "Escape", key: "Escape", nativeKeyCode: "Escape" },
   Backspace: { code: "Backspace", key: "Backspace", nativeKeyCode: "Backspace" },
   Tab: { code: "Tab", key: "Tab", nativeKeyCode: "Tab" },
-  Enter: { code: "Enter", key: "Enter", nativeKeyCode: "Enter" },
+  Enter: { code: "Enter", key: "Enter", nativeKeyCode: "Enter", text: "\r" },
   Shift: { code: "ShiftLeft", key: "Shift", nativeKeyCode: "Shift" },
   Control: { code: "ControlLeft", key: "Control", nativeKeyCode: "Control" },
   Alt: { code: "AltLeft", key: "Alt", nativeKeyCode: "Alt" },
@@ -71,6 +76,26 @@ const PRINTABLE_KEYS: ReadonlyArray<KeyDefinition> = [
   { code: "Slash", key: "/", shiftedKey: "?", nativeKeyCode: "/" },
 ];
 
+const MODIFIER_FOR_KEY: Readonly<Record<string, PreviewAutomationModifier | undefined>> = {
+  Alt: "alt",
+  Control: "control",
+  Meta: "meta",
+  Shift: "shift",
+};
+
+const makeSignal = (
+  definition: KeyDefinition,
+  modifiers: ReadonlyArray<PreviewAutomationModifier>,
+): PreviewAutomationKeySignal => ({
+  kind: "key",
+  key: definition.key,
+  code: definition.code,
+  meta: modifiers.includes("meta"),
+  shift: modifiers.includes("shift"),
+  control: modifiers.includes("control"),
+  alt: modifiers.includes("alt"),
+});
+
 function resolveKeyDefinition(input: PreviewAutomationPressInput): KeyDefinition {
   const named = NAMED_KEYS[input.key];
   if (named) return named;
@@ -112,35 +137,43 @@ export function makePreviewAutomationKeySequence(
   input: PreviewAutomationPressInput,
 ): PreviewAutomationKeySequence {
   const definition = resolveKeyDefinition(input);
-  const modifiers = Array.from(
+  const explicitModifiers = Array.from(
     new Set((input.modifiers ?? []).map((modifier) => modifier.toLowerCase())),
-  ) as Array<"alt" | "control" | "meta" | "shift">;
+  ) as Array<PreviewAutomationModifier>;
   const needsImplicitShift =
     /^[A-Z]$/.test(definition.key) || definition.shiftedKey === definition.key;
-  if (needsImplicitShift && !modifiers.includes("shift")) modifiers.push("shift");
+  if (needsImplicitShift && !explicitModifiers.includes("shift")) explicitModifiers.push("shift");
+  const pressedModifier = MODIFIER_FOR_KEY[definition.key];
+  const keyDownModifiers = [...explicitModifiers];
+  if (pressedModifier && !keyDownModifiers.includes(pressedModifier)) {
+    keyDownModifiers.push(pressedModifier);
+  }
+  const keyUpModifiers = pressedModifier
+    ? explicitModifiers.filter((modifier) => modifier !== pressedModifier)
+    : [...explicitModifiers];
   const suppressText = input.modifiers?.some((modifier) => modifier !== "Shift") ?? false;
-  const shared = { keyCode: definition.nativeKeyCode, modifiers };
 
   return {
-    keyDown: { type: "rawKeyDown", ...shared },
+    keyDown: {
+      type: "rawKeyDown",
+      keyCode: definition.nativeKeyCode,
+      modifiers: keyDownModifiers,
+    },
     ...(!suppressText && definition.text
       ? {
           char: {
             type: "char" as const,
             keyCode: definition.text,
-            modifiers,
+            modifiers: keyDownModifiers,
           },
         }
       : {}),
-    keyUp: { type: "keyUp", ...shared },
-    signal: {
-      kind: "key",
-      key: definition.key,
-      code: definition.code,
-      meta: modifiers.includes("meta"),
-      shift: modifiers.includes("shift"),
-      control: modifiers.includes("control"),
-      alt: modifiers.includes("alt"),
+    keyUp: {
+      type: "keyUp",
+      keyCode: definition.nativeKeyCode,
+      modifiers: keyUpModifiers,
     },
+    keyDownSignal: makeSignal(definition, keyDownModifiers),
+    keyUpSignal: makeSignal(definition, keyUpModifiers),
   };
 }
