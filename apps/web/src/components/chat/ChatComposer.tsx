@@ -45,7 +45,11 @@ import {
   replaceTextRange,
 } from "../../composer-logic";
 import { DISCONNECTED_COMPOSER_PLACEHOLDER } from "../../composerPlaceholder";
-import { deriveComposerSendState, readFileAsDataUrl } from "../ChatView.logic";
+import {
+  cloneComposerImageForRetry,
+  deriveComposerSendState,
+  readFileAsDataUrl,
+} from "../ChatView.logic";
 import {
   dataTransferHasComposerMention,
   makeComposerMentionDragHandlers,
@@ -2020,7 +2024,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     if (
       compactDisabled ||
       noProviderAvailable ||
-      composerSendState.hasSendableContent ||
       activePendingApproval !== null ||
       pendingUserInputs.length > 0 ||
       phase === "running" ||
@@ -2042,23 +2045,63 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       return;
     }
 
+    // Preview annotations and review comments are read from render state,
+    // not refs, so they cannot be set aside for one send. Rare mid-thread;
+    // ask the user to deal with them first.
+    const draft = getComposerDraft(composerDraftTarget);
+    if ((draft?.previewAnnotations.length ?? 0) > 0 || (draft?.reviewComments.length ?? 0) > 0) {
+      toastManager.add({
+        type: "info",
+        title: "Send or remove the attached annotations first.",
+        description: "Compacting sends a separate message; annotations would go with it.",
+      });
+      return;
+    }
+    // Set the draft aside so "/compact" goes out alone, then put it back.
+    // The send reads prompt and attachment refs synchronously, so swapping
+    // them around the call is enough.
+    const setAside = {
+      prompt: promptRef.current,
+      images: [...composerImagesRef.current],
+      terminalContexts: [...composerTerminalContextsRef.current],
+      elementContexts: [...composerElementContextsRef.current],
+    };
     promptRef.current = "/compact";
+    composerImagesRef.current = [];
+    composerTerminalContextsRef.current = [];
+    composerElementContextsRef.current = [];
     setComposerDraftPrompt(composerDraftTarget, "/compact");
     submitComposer();
-    // A blocked dispatch (busy send ref, provider preflight rejection)
-    // would leave the injected "/compact" behind as if the user typed it.
-    // Clearing here is safe even when the send did dispatch: the send
-    // snapshots its prompt synchronously and clears the draft itself.
-    if (promptRef.current === "/compact") {
-      promptRef.current = "";
-      setComposerDraftPrompt(composerDraftTarget, "");
+    // Whether the send dispatched (draft cleared) or was blocked ("/compact"
+    // still here), the user's draft comes back as it was.
+    const drafts = useComposerDraftStore.getState();
+    promptRef.current = setAside.prompt;
+    setComposerDraftPrompt(composerDraftTarget, setAside.prompt);
+    const restoredImages = setAside.images.map(cloneComposerImageForRetry);
+    composerImagesRef.current = restoredImages;
+    composerTerminalContextsRef.current = setAside.terminalContexts;
+    composerElementContextsRef.current = setAside.elementContexts;
+    if (restoredImages.length > 0) {
+      addComposerDraftImages(composerDraftTarget, restoredImages);
     }
+    drafts.setTerminalContexts(composerDraftTarget, setAside.terminalContexts);
+    drafts.setElementContexts(composerDraftTarget, setAside.elementContexts);
+    composerRef.current?.resetCursorState({
+      cursor: collapseExpandedComposerCursor(setAside.prompt, setAside.prompt.length),
+      prompt: setAside.prompt,
+      detectTrigger: false,
+    });
   }, [
     activePendingApproval,
     activeThreadId,
+    addComposerDraftImages,
     compactDisabled,
     composerDraftTarget,
-    composerSendState.hasSendableContent,
+    composerElementContextsRef,
+    composerImagesRef,
+    composerRef,
+    composerTerminalContextsRef,
+    getComposerDraft,
     isConnecting,
     isSendBusy,
     noProviderAvailable,
