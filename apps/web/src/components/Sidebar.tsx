@@ -147,7 +147,6 @@ import {
 } from "./Sidebar.logic";
 import { resolveLocalCheckoutBranchMismatch } from "./BranchToolbar.logic";
 import {
-  ThreadWorktreeIndicator,
   nextThreadChangeRequestSnapshot,
   prStatusIndicator,
   resolveDisplayedThreadPr,
@@ -1411,7 +1410,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       }
       {...(sortable?.listeners ?? {})}
       className={cn(
-        "list-none py-0.5 [content-visibility:auto] [contain-intrinsic-size:auto_92px]",
+        "list-none py-0.5 [content-visibility:auto] [contain-intrinsic-size:auto_66px]",
         sortable?.isDragging && "z-20 opacity-80",
       )}
     >
@@ -1431,7 +1430,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             />
           }
         >
-          <div className="relative z-10 h-[4.625rem] px-[var(--sidebar-row-content-inset)] py-[var(--sidebar-content-inset)]">
+          <div className="relative z-10 h-[2.875rem] px-[var(--sidebar-row-content-inset)] py-[var(--sidebar-content-inset)]">
             <div className="flex h-5 min-w-0 items-center gap-1.5">
               <ProjectFavicon
                 environmentId={thread.environmentId}
@@ -1447,7 +1446,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                     "min-w-0 flex-1 truncate text-xs",
                     shouldRecede
                       ? "font-normal text-secondary-label"
-                      : "font-medium text-foreground/80",
+                      : "font-semibold text-foreground",
                   )}
                 >
                   {props.projectTitle}
@@ -1455,6 +1454,33 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               ) : (
                 <span className="flex-1" />
               )}
+              <span
+                aria-hidden
+                className="pointer-events-none inline-flex shrink-0 items-center gap-1"
+              >
+                {isRemote ? (
+                  <span className="inline-flex shrink-0 items-center text-sidebar-muted-foreground/70">
+                    <ServerIcon aria-hidden className="size-3.5" />
+                  </span>
+                ) : null}
+                {driverKind ? (
+                  <span className="inline-flex shrink-0 items-center">
+                    <ProviderInstanceIcon
+                      driverKind={driverKind}
+                      displayName={
+                        providerEntry?.displayName ??
+                        thread.session?.providerName ??
+                        modelInstanceId
+                      }
+                      accentColor={providerEntry?.accentColor}
+                      showBadge={showInstanceBadge}
+                      // Glyph dims, badge stays saturated; offset matches the composer trigger.
+                      iconClassName="size-3.5 opacity-60"
+                      badgeClassName="right-[-0.1875rem] bottom-[-0.1875rem] h-3 min-w-3 px-0.5 text-[7px]"
+                    />
+                  </span>
+                ) : null}
+              </span>
               {pinIndicator}
               {/* The visible state owns this slot's width: status at rest,
                   actions on hover/keyboard focus or while the popover is open. Keeping
@@ -1563,61 +1589,21 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 ) : null}
               </span>
             </div>
-            <div className="mt-1 flex min-w-0">
+            <div className="mt-1 flex min-w-0 items-center gap-1.5">
               {title}
               {isRegeneratingTitle ? (
                 <span role="status" className="sr-only">
                   Regenerating title
                 </span>
               ) : null}
-            </div>
-            <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-secondary-label text-xs">
-              {/* Always the branch. The plan step used to take this slot while
-                  working, but it truncated to a half-sentence and dropped the
-                  branch, so the row lost its most stable identifier. */}
-              {thread.branch ? (
-                <>
-                  <ThreadWorktreeIndicator thread={thread} />
-                  <span className="min-w-0 flex-1 truncate whitespace-nowrap">{thread.branch}</span>
-                </>
-              ) : (
-                <span className="flex-1" />
-              )}
               {terminalStatusIcon}
               {prBadge}
               {diff ? (
-                <span className="shrink-0 font-mono">
+                <span className="shrink-0 font-mono text-xs">
                   <span className="text-emerald-600 dark:text-emerald-400">+{diff.insertions}</span>{" "}
                   <span className="text-red-600 dark:text-red-400">−{diff.deletions}</span>
                 </span>
               ) : null}
-              <span
-                aria-hidden
-                className="pointer-events-none ml-auto inline-flex shrink-0 items-center gap-1"
-              >
-                {isRemote ? (
-                  <span className="inline-flex shrink-0 items-center text-sidebar-muted-foreground/70">
-                    <ServerIcon aria-hidden className="size-3.5" />
-                  </span>
-                ) : null}
-                {driverKind ? (
-                  <span className="inline-flex shrink-0 items-center">
-                    <ProviderInstanceIcon
-                      driverKind={driverKind}
-                      displayName={
-                        providerEntry?.displayName ??
-                        thread.session?.providerName ??
-                        modelInstanceId
-                      }
-                      accentColor={providerEntry?.accentColor}
-                      showBadge={showInstanceBadge}
-                      // Glyph dims, badge stays saturated; offset matches the composer trigger.
-                      iconClassName="size-3.5 opacity-60"
-                      badgeClassName="right-[-0.1875rem] bottom-[-0.1875rem] h-3 min-w-3 px-0.5 text-[7px]"
-                    />
-                  </span>
-                ) : null}
-              </span>
             </div>
           </div>
           {props.jumpLabel ? <JumpHintBadge label={props.jumpLabel} /> : null}
