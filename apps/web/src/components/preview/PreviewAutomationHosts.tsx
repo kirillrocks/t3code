@@ -52,6 +52,8 @@ import { useAtomCommand } from "~/state/use-atom-command";
 import { previewBridge } from "./previewBridge";
 import {
   confirmPreviewAutomationClickDispatched,
+  PreviewAutomationClickDeliveryUnconfirmedHostError,
+  PreviewAutomationClickTimeoutHostError,
   PreviewAutomationOperationError,
   PreviewAutomationOverlayTimeoutError,
   PreviewAutomationRecordingNotActiveError,
@@ -79,13 +81,23 @@ import { isPreviewViewportReady } from "./previewViewportReadiness";
 import { shouldRollbackPreviewViewport } from "./previewViewportRollback";
 
 const PREVIEW_PRESENTATION_SETTLE_TIMEOUT_MS = 500;
+const PREVIEW_CLICK_REGISTRATION_POLL_MS = 16;
+const PREVIEW_CLICK_RESPONSE_RESERVE_MS = 50;
+
+export const isPreviewPresentationConfirmed = (
+  runtimeTabId: string,
+  bridge: DesktopPreviewBridge | null = previewBridge,
+): boolean =>
+  Boolean(
+    useBrowserSurfaceStore.getState().byTabId[runtimeTabId]?.visible &&
+    (!bridge?.setWebviewVisibility ||
+      findPreviewWebview(runtimeTabId)?.getAttribute("data-preview-main-visible") === "true"),
+  );
 
 const waitForPreviewPresentation = async (runtimeTabId: string): Promise<void> => {
   const deadline = Date.now() + PREVIEW_PRESENTATION_SETTLE_TIMEOUT_MS;
   while (Date.now() <= deadline) {
-    const visible = useBrowserSurfaceStore.getState().byTabId[runtimeTabId]?.visible;
-    const webview = findPreviewWebview(runtimeTabId);
-    if (visible && webview?.getAttribute("data-preview-main-visible") === "true") return;
+    if (isPreviewPresentationConfirmed(runtimeTabId)) return;
     await new Promise<void>((resolve) => window.setTimeout(resolve, 16));
   }
 };
@@ -139,12 +151,142 @@ const readPreviewWebviewRegistration = (
 
 type PreviewAutomationClickContext = Parameters<typeof confirmPreviewAutomationClickDispatched>[1];
 
+interface PreviewAutomationClickTiming {
+  readonly deadline: number;
+  readonly timeoutMs: number;
+}
+
+const makePreviewClickTimeoutError = (
+  context: PreviewAutomationClickContext,
+  timing: PreviewAutomationClickTiming,
+) => new PreviewAutomationClickTimeoutHostError({ ...context, timeoutMs: timing.timeoutMs });
+
+const assertPreviewClickBeforeDeadline = (
+  context: PreviewAutomationClickContext,
+  timing: PreviewAutomationClickTiming,
+): void => {
+  if (performance.now() >= timing.deadline) {
+    throw makePreviewClickTimeoutError(context, timing);
+  }
+};
+
+const awaitPreviewClickStep = <A,>(
+  start: () => Promise<A>,
+  context: PreviewAutomationClickContext,
+  timing: PreviewAutomationClickTiming,
+  options?: {
+    readonly invalidationSignal?: AbortSignal;
+    readonly timeoutError?: () => Error;
+  },
+): Promise<A> => {
+  assertPreviewClickBeforeDeadline(context, timing);
+  if (options?.invalidationSignal?.aborted) {
+    return Promise.reject(new PreviewAutomationTabNotVisibleHostError(context));
+  }
+  const remainingMs = timing.deadline - performance.now();
+  return new Promise<A>((resolve, reject) => {
+    let settled = false;
+    const finish = (settle: () => void) => {
+      if (settled) return;
+      settled = true;
+      globalThis.clearTimeout(timeout);
+      options?.invalidationSignal?.removeEventListener("abort", onInvalidated);
+      settle();
+    };
+    const onInvalidated = () =>
+      finish(() => reject(new PreviewAutomationTabNotVisibleHostError(context)));
+    const timeout = globalThis.setTimeout(
+      () =>
+        finish(() =>
+          reject(options?.timeoutError?.() ?? makePreviewClickTimeoutError(context, timing)),
+        ),
+      remainingMs,
+    );
+    options?.invalidationSignal?.addEventListener("abort", onInvalidated, { once: true });
+    if (options?.invalidationSignal?.aborted) {
+      onInvalidated();
+      return;
+    }
+    try {
+      assertPreviewClickBeforeDeadline(context, timing);
+      start().then(
+        (value) => finish(() => resolve(value)),
+        (cause) => finish(() => reject(cause)),
+      );
+    } catch (cause) {
+      finish(() => reject(cause));
+    }
+  });
+};
+
+const waitForPreviewClickRegistrationPoll = (
+  context: PreviewAutomationClickContext,
+  timing: PreviewAutomationClickTiming,
+  invalidationSignal?: AbortSignal,
+): Promise<void> => {
+  assertPreviewClickBeforeDeadline(context, timing);
+  if (invalidationSignal?.aborted) {
+    return Promise.reject(new PreviewAutomationTabNotVisibleHostError(context));
+  }
+  const remainingMs = timing.deadline - performance.now();
+  const delayMs = Math.min(PREVIEW_CLICK_REGISTRATION_POLL_MS, remainingMs);
+  return new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const finish = (settle: () => void) => {
+      if (settled) return;
+      settled = true;
+      globalThis.clearTimeout(timeout);
+      invalidationSignal?.removeEventListener("abort", onInvalidated);
+      settle();
+    };
+    const onInvalidated = () =>
+      finish(() => reject(new PreviewAutomationTabNotVisibleHostError(context)));
+    const timeout = globalThis.setTimeout(
+      () =>
+        finish(() => {
+          if (delayMs === remainingMs) reject(makePreviewClickTimeoutError(context, timing));
+          else resolve();
+        }),
+      delayMs,
+    );
+    invalidationSignal?.addEventListener("abort", onInvalidated, { once: true });
+    if (invalidationSignal?.aborted) onInvalidated();
+  });
+};
+
+const waitForDesktopOverlayBeforePreviewClick = async (
+  threadRef: ScopedThreadRef,
+  tabId: string,
+  runtimeTabId: string,
+  bridge: DesktopPreviewBridge,
+  context: PreviewAutomationClickContext,
+  timing: PreviewAutomationClickTiming,
+): Promise<void> => {
+  while (true) {
+    assertPreviewClickBeforeDeadline(context, timing);
+    const state = assertPreviewRuntimeCurrent(threadRef, tabId, runtimeTabId, context);
+    if (state.desktopByTabId[tabId]) {
+      const status = await awaitPreviewClickStep(
+        () => bridge.automation.status(runtimeTabId),
+        context,
+        timing,
+      );
+      assertPreviewClickBeforeDeadline(context, timing);
+      if (status.available) return;
+    }
+    await waitForPreviewClickRegistrationPoll(context, timing);
+  }
+};
+
 export async function clickVisiblePreview(
   runtimeTabId: string,
   input: PreviewAutomationClickInput,
   bridge: DesktopPreviewBridge,
   context: PreviewAutomationClickContext,
+  timing: PreviewAutomationClickTiming,
+  assertRuntimeCurrent: () => void,
 ) {
+  assertPreviewClickBeforeDeadline(context, timing);
   const presentation = useBrowserSurfaceStore.getState().byTabId[runtimeTabId];
   if (!presentation?.visible || presentation.owner === null) {
     throw new PreviewAutomationTabNotVisibleHostError(context);
@@ -152,9 +294,8 @@ export async function clickVisiblePreview(
 
   const presentationOwner = presentation.owner;
   const webview = findPreviewWebview(runtimeTabId);
-  const registration = readPreviewWebviewRegistration(webview);
   const setWebviewVisibility = bridge.setWebviewVisibility;
-  if (!webview || !registration || !setWebviewVisibility) {
+  if (!webview || !setWebviewVisibility) {
     throw new PreviewAutomationTargetUnavailableError({
       ...context,
       bridgeAvailable: Boolean(setWebviewVisibility),
@@ -162,7 +303,14 @@ export async function clickVisiblePreview(
   }
 
   let invalidated = false;
+  let registration = readPreviewWebviewRegistration(webview);
+  const invalidation = new AbortController();
+  const presentationIsCurrent = () => {
+    const currentPresentation = useBrowserSurfaceStore.getState().byTabId[runtimeTabId];
+    return currentPresentation?.visible === true && currentPresentation.owner === presentationOwner;
+  };
   const targetIsCurrent = () => {
+    if (!registration) return false;
     const currentPresentation = useBrowserSurfaceStore.getState().byTabId[runtimeTabId];
     const currentWebview = findPreviewWebview(runtimeTabId);
     const currentRegistration = readPreviewWebviewRegistration(currentWebview);
@@ -175,6 +323,7 @@ export async function clickVisiblePreview(
     );
   };
   const setCapturedWebviewHidden = () => {
+    if (!registration) return Promise.resolve();
     webview.removeAttribute("data-preview-main-visible");
     return setWebviewVisibility(
       runtimeTabId,
@@ -183,9 +332,18 @@ export async function clickVisiblePreview(
       false,
     ).catch(() => undefined);
   };
+  const assertRuntimeCurrentBeforeDispatch = () => {
+    try {
+      assertRuntimeCurrent();
+    } catch (cause) {
+      void setCapturedWebviewHidden();
+      throw cause;
+    }
+  };
   const invalidate = () => {
     if (invalidated) return;
     invalidated = true;
+    invalidation.abort();
     void setCapturedWebviewHidden();
   };
   const unsubscribe = useBrowserSurfaceStore.subscribe((state) => {
@@ -194,37 +352,94 @@ export async function clickVisiblePreview(
   });
 
   try {
+    assertRuntimeCurrentBeforeDispatch();
+    while (!registration) {
+      assertPreviewClickBeforeDeadline(context, timing);
+      assertRuntimeCurrentBeforeDispatch();
+      if (!presentationIsCurrent() || findPreviewWebview(runtimeTabId) !== webview) {
+        invalidate();
+        throw new PreviewAutomationTabNotVisibleHostError(context);
+      }
+      registration = readPreviewWebviewRegistration(webview);
+      assertPreviewClickBeforeDeadline(context, timing);
+      if (!registration) {
+        await waitForPreviewClickRegistrationPoll(context, timing, invalidation.signal);
+      }
+    }
+    const capturedRegistration = registration;
+    assertPreviewClickBeforeDeadline(context, timing);
+    assertRuntimeCurrentBeforeDispatch();
     if (!targetIsCurrent()) {
       invalidate();
-      await setCapturedWebviewHidden();
+      void setCapturedWebviewHidden();
       throw new PreviewAutomationTabNotVisibleHostError(context);
     }
     try {
-      await setWebviewVisibility(
-        runtimeTabId,
-        registration.webContentsId,
-        registration.attachmentId,
-        true,
+      assertPreviewClickBeforeDeadline(context, timing);
+      await awaitPreviewClickStep(
+        () =>
+          setWebviewVisibility(
+            runtimeTabId,
+            capturedRegistration.webContentsId,
+            capturedRegistration.attachmentId,
+            true,
+          ),
+        context,
+        timing,
+        { invalidationSignal: invalidation.signal },
       );
     } catch (cause) {
-      if (!invalidated && targetIsCurrent()) throw cause;
-      await setCapturedWebviewHidden();
+      if (!invalidated && targetIsCurrent()) {
+        void setCapturedWebviewHidden();
+        throw cause;
+      }
+      void setCapturedWebviewHidden();
       throw new PreviewAutomationTabNotVisibleHostError(context);
     }
+    assertPreviewClickBeforeDeadline(context, timing);
+    assertRuntimeCurrentBeforeDispatch();
     if (invalidated || !targetIsCurrent()) {
       invalidate();
       // This second false starts after the true acknowledgement, so a hide
       // during that acknowledgement cannot leave the old attachment visible.
-      await setCapturedWebviewHidden();
+      void setCapturedWebviewHidden();
       throw new PreviewAutomationTabNotVisibleHostError(context);
     }
     webview.setAttribute("data-preview-main-visible", "true");
-    const result = await bridge.automation.click(
-      runtimeTabId,
-      input,
-      registration.webContentsId,
-      registration.attachmentId,
+    assertPreviewClickBeforeDeadline(context, timing);
+    assertRuntimeCurrentBeforeDispatch();
+    const result = await awaitPreviewClickStep(
+      () =>
+        bridge.automation.click(
+          runtimeTabId,
+          input,
+          capturedRegistration.webContentsId,
+          capturedRegistration.attachmentId,
+        ),
+      context,
+      timing,
+      {
+        timeoutError: () => new PreviewAutomationClickDeliveryUnconfirmedHostError(context),
+      },
     );
+    if (result?._tag === "NotSent") {
+      return confirmPreviewAutomationClickDispatched(result, context);
+    }
+    let runtimeIsCurrent = true;
+    try {
+      assertRuntimeCurrent();
+    } catch {
+      runtimeIsCurrent = false;
+    }
+    if (
+      result?._tag === "Dispatched" &&
+      (performance.now() >= timing.deadline ||
+        invalidated ||
+        !runtimeIsCurrent ||
+        !targetIsCurrent())
+    ) {
+      throw new PreviewAutomationClickDeliveryUnconfirmedHostError(context);
+    }
     return confirmPreviewAutomationClickDispatched(result, context);
   } finally {
     unsubscribe();
@@ -319,12 +534,7 @@ const currentStatus = async (
   const state = readThreadPreviewState(threadRef);
   const { snapshot, tabId } = resolvePreviewAutomationTarget(state, requestedTabId);
   const runtimeTabId = tabId ? previewRuntimeTabId(threadRef, state.serverEpoch, tabId) : null;
-  const visible = runtimeTabId
-    ? Boolean(
-        useBrowserSurfaceStore.getState().byTabId[runtimeTabId]?.visible &&
-        findPreviewWebview(runtimeTabId)?.getAttribute("data-preview-main-visible") === "true",
-      )
-    : false;
+  const visible = runtimeTabId ? isPreviewPresentationConfirmed(runtimeTabId) : false;
   const viewportSetting = snapshot ? (snapshot.viewport ?? FILL_PREVIEW_VIEWPORT) : undefined;
   const viewport = runtimeTabId ? await readRenderedViewport(runtimeTabId).catch(() => null) : null;
   const viewportStatus = {
@@ -418,6 +628,11 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
 
   const handleRequest = useCallback(
     async (request: PreviewAutomationRequest): Promise<unknown> => {
+      const clickTiming = {
+        deadline:
+          performance.now() + Math.max(0, request.timeoutMs - PREVIEW_CLICK_RESPONSE_RESERVE_MS),
+        timeoutMs: request.timeoutMs,
+      };
       const threadRef: ScopedThreadRef = {
         environmentId,
         threadId: request.threadId,
@@ -448,7 +663,7 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
           tabId,
           bridgeAvailable: Boolean(previewBridge),
         };
-        const requireReadyTab = async () => {
+        const requireReadyTab = async (clickContext?: PreviewAutomationClickContext) => {
           const bridge = previewBridge;
           const readyTabId = tabId;
           if (!bridge || !readyTabId) {
@@ -456,14 +671,26 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
           }
           const readyState = readThreadPreviewState(threadRef);
           const runtimeTabId = previewRuntimeTabId(threadRef, readyState.serverEpoch, readyTabId);
-          await waitForDesktopOverlay(
-            threadRef,
-            request.requestId,
-            readyTabId,
-            runtimeTabId,
-            request.operation,
-            request.timeoutMs,
-          );
+          if (clickContext) {
+            assertPreviewClickBeforeDeadline(clickContext, clickTiming);
+            await waitForDesktopOverlayBeforePreviewClick(
+              threadRef,
+              readyTabId,
+              runtimeTabId,
+              bridge,
+              clickContext,
+              clickTiming,
+            );
+          } else {
+            await waitForDesktopOverlay(
+              threadRef,
+              request.requestId,
+              readyTabId,
+              runtimeTabId,
+              request.operation,
+              request.timeoutMs,
+            );
+          }
           return {
             bridge,
             tabId: readyTabId,
@@ -703,17 +930,31 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
             return await ready.bridge.automation.snapshot(ready.runtimeTabId);
           }
           case "click": {
-            const ready = await requireReadyTab();
+            const clickTabId = tabId;
+            if (!clickTabId) {
+              throw new PreviewAutomationTargetUnavailableError(unavailableTarget);
+            }
+            const clickContext = {
+              requestId: request.requestId,
+              operation: request.operation,
+              environmentId,
+              threadId: request.threadId,
+              tabId: clickTabId,
+            };
+            const ready = await requireReadyTab(clickContext);
             return await clickVisiblePreview(
               ready.runtimeTabId,
               request.input as PreviewAutomationClickInput,
               ready.bridge,
-              {
-                requestId: request.requestId,
-                operation: request.operation,
-                environmentId,
-                threadId: request.threadId,
-                tabId: ready.tabId,
+              { ...clickContext, tabId: ready.tabId },
+              clickTiming,
+              () => {
+                assertPreviewRuntimeCurrent(
+                  threadRef,
+                  ready.tabId,
+                  ready.runtimeTabId,
+                  clickContext,
+                );
               },
             );
           }

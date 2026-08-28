@@ -155,6 +155,45 @@ export class PreviewAutomationTabNotVisibleHostError extends Schema.TaggedErrorC
   }
 }
 
+export class PreviewAutomationClickTimeoutHostError extends Schema.TaggedErrorClass<PreviewAutomationClickTimeoutHostError>()(
+  "PreviewAutomationClickTimeoutHostError",
+  {
+    requestId: TrimmedNonEmptyString,
+    operation: Schema.Literal("click"),
+    environmentId: EnvironmentId,
+    threadId: ThreadId,
+    tabId: PreviewTabId,
+    timeoutMs: Schema.Int,
+  },
+) {
+  get responseTag() {
+    return "PreviewAutomationTimeoutError" as const;
+  }
+
+  override get message(): string {
+    return `Preview click request ${this.requestId} timed out before mouse input could be sent to tab ${this.tabId}.`;
+  }
+}
+
+export class PreviewAutomationClickDeliveryUnconfirmedHostError extends Schema.TaggedErrorClass<PreviewAutomationClickDeliveryUnconfirmedHostError>()(
+  "PreviewAutomationClickDeliveryUnconfirmedHostError",
+  {
+    requestId: TrimmedNonEmptyString,
+    operation: Schema.Literal("click"),
+    environmentId: EnvironmentId,
+    threadId: ThreadId,
+    tabId: PreviewTabId,
+  },
+) {
+  get responseTag() {
+    return "PreviewAutomationExecutionError" as const;
+  }
+
+  override get message(): string {
+    return `Mouse input MAY have been sent to preview tab ${this.tabId}, but T3 Code could not confirm that the target stayed visible. Inspect the tab before you retry.`;
+  }
+}
+
 export function confirmPreviewAutomationClickDispatched(
   result: DesktopPreviewAutomationClickResult | void,
   context: PreviewAutomationOperationContext & {
@@ -250,6 +289,8 @@ export const PreviewAutomationHostError = Schema.Union([
   PreviewAutomationRecordingNotActiveError,
   PreviewAutomationTargetNotEditableHostError,
   PreviewAutomationTabNotVisibleHostError,
+  PreviewAutomationClickTimeoutHostError,
+  PreviewAutomationClickDeliveryUnconfirmedHostError,
   PreviewAutomationOperationError,
 ]);
 export type PreviewAutomationHostError = typeof PreviewAutomationHostError.Type;
