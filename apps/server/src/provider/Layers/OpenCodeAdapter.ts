@@ -2565,9 +2565,21 @@ export function makeOpenCodeAdapter(
         context.cancellation = cancellation;
 
         const abortExit = yield* Effect.exit(
-          runOpenCodeSdk("session.abort", () =>
-            context.client.session.abort({ sessionID: context.openCodeSessionId }),
-          ).pipe(Effect.mapError(toRequestError)),
+          runOpenCodeSdk("session.abort", (signal) =>
+            context.client.session.abort({ sessionID: context.openCodeSessionId }, { signal }),
+          ).pipe(
+            Effect.timeout("10 seconds"),
+            Effect.mapError((cause) =>
+              OpenCodeRuntimeError.is(cause)
+                ? toRequestError(cause)
+                : new ProviderAdapterRequestError({
+                    provider: PROVIDER,
+                    method: "session.abort",
+                    detail: "OpenCode session abort did not complete within 10 seconds.",
+                    cause,
+                  }),
+            ),
+          ),
         );
         if (Exit.isFailure(abortExit)) {
           if (interruptedTurnId && context.interruptedTurnId === interruptedTurnId) {

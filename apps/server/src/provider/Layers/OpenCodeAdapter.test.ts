@@ -64,7 +64,10 @@ const runtimeMock = {
     createdSessionIds: [] as string[],
     authHeaders: [] as Array<string | null>,
     abortCalls: [] as string[],
-    abortImplementation: null as ((sessionID: string) => Promise<void>) | null,
+    abortSignals: [] as AbortSignal[],
+    abortImplementation: null as
+      | ((sessionID: string, signal?: AbortSignal) => Promise<void>)
+      | null,
     closeCalls: [] as string[],
     revertCalls: [] as Array<{ sessionID: string; messageID?: string }>,
     messageCalls: [] as Array<{ sessionID: string; messageID: string }>,
@@ -110,6 +113,7 @@ const runtimeMock = {
     this.state.createdSessionIds.length = 0;
     this.state.authHeaders.length = 0;
     this.state.abortCalls.length = 0;
+    this.state.abortSignals.length = 0;
     this.state.abortImplementation = null;
     this.state.closeCalls.length = 0;
     this.state.revertCalls.length = 0;
@@ -236,9 +240,12 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
           }
           return { data: { id: forkedId, ...(directory ? { directory } : {}) } };
         },
-        abort: async ({ sessionID }: { sessionID: string }) => {
+        abort: async ({ sessionID }: { sessionID: string }, options?: { signal?: AbortSignal }) => {
           runtimeMock.state.abortCalls.push(sessionID);
-          await runtimeMock.state.abortImplementation?.(sessionID);
+          if (options?.signal) {
+            runtimeMock.state.abortSignals.push(options.signal);
+          }
+          await runtimeMock.state.abortImplementation?.(sessionID, options?.signal);
         },
         status: async () => {
           runtimeMock.state.sessionStatusCalls += 1;
@@ -2450,6 +2457,97 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
     }),
   );
 
+  it.effect("releases stop and send waiters when a native abort times out", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-interrupt-timeout");
+      const abortStarted = promiseWithResolvers<void>();
+      runtimeMock.state.abortImplementation = async () => {
+        abortStarted.resolve(undefined);
+        await new Promise<void>(() => {});
+      };
+
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+      const turn = yield* adapter.sendTurn({
+        threadId,
+        input: "Keep working",
+        modelSelection: createModelSelection(
+          ProviderInstanceId.make("opencode"),
+          "opencode/kimi-k3",
+        ),
+      });
+      const unexpectedEventFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter(
+          (event) =>
+            event.threadId === threadId &&
+            (event.type === "turn.completed" || event.type === "turn.aborted"),
+        ),
+        Stream.runHead,
+        Effect.forkChild,
+      );
+      const firstInterrupt = yield* adapter
+        .interruptTurn(threadId, turn.turnId)
+        .pipe(Effect.result, Effect.forkChild);
+      yield* Effect.promise(() => abortStarted.promise);
+      const secondInterrupt = yield* adapter
+        .interruptTurn(threadId, turn.turnId)
+        .pipe(Effect.result, Effect.forkChild);
+      const sendFiber = yield* adapter
+        .sendTurn({
+          threadId,
+          input: "Wait for the stop request",
+          modelSelection: createModelSelection(
+            ProviderInstanceId.make("opencode"),
+            "opencode/kimi-k3",
+          ),
+        })
+        .pipe(Effect.result, Effect.forkChild);
+      yield* Effect.yieldNow;
+
+      yield* advanceTestClock(9_999);
+      NodeAssert.equal(firstInterrupt.pollUnsafe(), undefined);
+      NodeAssert.equal(secondInterrupt.pollUnsafe(), undefined);
+      NodeAssert.equal(sendFiber.pollUnsafe(), undefined);
+      yield* advanceTestClock(1);
+
+      const firstResult = yield* Fiber.join(firstInterrupt);
+      const secondResult = yield* Fiber.join(secondInterrupt);
+      const sendResult = yield* Fiber.join(sendFiber);
+      NodeAssert.equal(firstResult._tag, "Failure");
+      NodeAssert.equal(secondResult._tag, "Failure");
+      NodeAssert.equal(sendResult._tag, "Failure");
+      if (firstResult._tag === "Failure") {
+        NodeAssert.equal(firstResult.failure._tag, "ProviderAdapterRequestError");
+        NodeAssert.equal(
+          firstResult.failure.detail,
+          "OpenCode session abort did not complete within 10 seconds.",
+        );
+      }
+      NodeAssert.equal(runtimeMock.state.abortCalls.length, 1);
+      NodeAssert.equal(runtimeMock.state.abortSignals.length, 1);
+      NodeAssert.equal(runtimeMock.state.abortSignals[0]?.aborted, true);
+      NodeAssert.equal(unexpectedEventFiber.pollUnsafe(), undefined);
+
+      runtimeMock.state.abortImplementation = null;
+      yield* adapter.sendTurn({
+        threadId,
+        input: "Continue after the failed stop request",
+        modelSelection: createModelSelection(
+          ProviderInstanceId.make("opencode"),
+          "opencode/kimi-k3",
+        ),
+      });
+      NodeAssert.equal(runtimeMock.state.promptCalls.length, 2);
+
+      yield* Fiber.interrupt(unexpectedEventFiber);
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
   it.effect("shares one abort request across concurrent stops", () =>
     Effect.gen(function* () {
       const adapter = yield* OpenCodeAdapter;
@@ -2507,19 +2605,17 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
     }),
   );
 
-  it.effect("accepts a native turnless abort before its request fails", () =>
+  it.effect("accepts a native turnless abort before its request times out", () =>
     Effect.gen(function* () {
       const adapter = yield* OpenCodeAdapter;
       const threadId = asThreadId("thread-turnless-interrupt");
       const abortEvent = promiseWithResolvers<unknown>();
       const markerEvent = promiseWithResolvers<unknown>();
       const abortStarted = promiseWithResolvers<void>();
-      const abortRelease = promiseWithResolvers<void>();
       runtimeMock.state.subscribedEvents = [abortEvent.promise, markerEvent.promise];
       runtimeMock.state.abortImplementation = async () => {
         abortStarted.resolve(undefined);
-        await abortRelease.promise;
-        throw new Error("abort response failed after native acknowledgment");
+        await new Promise<void>(() => {});
       };
 
       yield* adapter.startSession({
@@ -2586,14 +2682,16 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
         Stream.runHead,
         Effect.forkChild,
       );
-      abortRelease.resolve(undefined);
+      yield* advanceTestClock(10_000);
       yield* Fiber.join(firstInterrupt);
       yield* Fiber.join(secondInterrupt);
       yield* Fiber.join(sendFiber);
 
       NodeAssert.equal(runtimeMock.state.promptCalls.length, 1);
+      NodeAssert.equal(runtimeMock.state.abortSignals[0]?.aborted, true);
       NodeAssert.equal(unexpectedEventFiber.pollUnsafe(), undefined);
       yield* Fiber.interrupt(unexpectedEventFiber);
+      runtimeMock.state.abortImplementation = null;
       yield* adapter.stopSession(threadId);
     }),
   );
