@@ -11,6 +11,13 @@ By default the thread you last sent a message to is on top. To change this, open
 
 Pinned, snoozed, and settled sections keep their own order.
 
+## Finding a project
+
+Click into the sidebar search box. While it is empty it lists your recent projects (the ones with
+the newest activity). Type to search projects and threads by name; matching projects show above
+matching threads. Pick a project to show only its threads, the same as the project filter menu.
+Pick it again to go back to all projects. Arrow keys and Enter work in the list; Escape closes it.
+
 ## Starting a thread in the same project
 
 Click the arrow beside **New thread** to start a thread in the project you are viewing, or pick

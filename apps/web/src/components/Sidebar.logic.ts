@@ -583,6 +583,28 @@ export {
 export { sortPinnedThreadsByOrderKey as sortPinnedThreadsForSidebar } from "@t3tools/client-runtime/state/thread-sort";
 
 /**
+ * Project matches for the sidebar search, by display name: prefix matches
+ * first, then any substring, keeping the incoming (recency) order within
+ * each tier. Case-insensitive; an empty query matches nothing.
+ */
+export function searchSidebarProjectsByName<T extends { readonly displayName: string }>(
+  projects: readonly T[],
+  query: string,
+  limit = 5,
+): T[] {
+  const needle = query.trim().toLowerCase();
+  if (needle.length === 0) return [];
+  const prefix: T[] = [];
+  const rest: T[] = [];
+  for (const project of projects) {
+    const name = project.displayName.toLowerCase();
+    if (name.startsWith(needle)) prefix.push(project);
+    else if (name.includes(needle)) rest.push(project);
+  }
+  return [...prefix, ...rest].slice(0, limit);
+}
+
+/**
  * Search the already-ordered sidebar thread collection by title only.
  * Keeping the input order means lifecycle ordering (active, snoozed, settled)
  * remains stable while the user narrows the list.

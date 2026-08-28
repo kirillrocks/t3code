@@ -23,6 +23,7 @@ import {
   resolveSidebarThreadStatus,
   resolveThreadStatusPill,
   resolveWorkingStartedAt,
+  searchSidebarProjectsByName,
   searchSidebarThreadsByTitle,
   formatWorkingDurationLabel,
   shouldNavigateAfterProjectRemoval,
@@ -780,6 +781,28 @@ describe("searchSidebarThreadsByTitle", () => {
 
   it("returns no results for an empty query", () => {
     expect(searchSidebarThreadsByTitle(threads, "   ")).toEqual([]);
+  });
+});
+
+describe("searchSidebarProjectsByName", () => {
+  const projects = [
+    { displayName: "t3code" },
+    { displayName: "nexora" },
+    { displayName: "BOT - Customer Service" },
+    { displayName: "mvlm-internal-system" },
+  ];
+
+  it("puts prefix matches before substring matches and ignores case", () => {
+    expect(searchSidebarProjectsByName(projects, "T").map((p) => p.displayName)).toEqual([
+      "t3code",
+      "BOT - Customer Service",
+      "mvlm-internal-system",
+    ]);
+  });
+
+  it("matches nothing for an empty query and respects the limit", () => {
+    expect(searchSidebarProjectsByName(projects, "  ")).toEqual([]);
+    expect(searchSidebarProjectsByName(projects, "e", 2)).toHaveLength(2);
   });
 });
 

@@ -138,6 +138,7 @@ import {
   resolveAdjacentThreadId,
   resolveSettledTimestamp,
   resolveSidebarThreadStatus,
+  searchSidebarProjectsByName,
   searchSidebarThreadsByTitle,
   shouldCreateNewThreadInCurrentProject,
   resolveWorkingStartedAt,
@@ -1731,6 +1732,62 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
   );
 });
 
+/**
+ * A project hit in the sidebar search (or a recent project while the search
+ * box is empty). Selecting it filters the sidebar to that project. Pointer
+ * down is swallowed so the search input keeps focus and the list stays open
+ * long enough for the click to land.
+ */
+const SidebarProjectSearchRow = memo(function SidebarProjectSearchRow(props: {
+  group: SidebarProjectSnapshot;
+  threadCount: number;
+  isHighlighted: boolean;
+  isScoped: boolean;
+  resultId: string;
+  onHighlight: () => void;
+  onSelect: () => void;
+}) {
+  const { group } = props;
+  return (
+    <li role="presentation" className="list-none">
+      <button
+        id={props.resultId}
+        type="button"
+        role="option"
+        tabIndex={-1}
+        aria-selected={props.isHighlighted}
+        aria-label={`Show threads of ${group.displayName}`}
+        onMouseMove={props.onHighlight}
+        onPointerDown={(event) => event.preventDefault()}
+        onClick={props.onSelect}
+        className={cn(
+          "flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-left text-sm outline-none",
+          props.isHighlighted || props.isScoped
+            ? "bg-sidebar-row-active text-sidebar-foreground"
+            : "text-sidebar-foreground/85 hover:bg-sidebar-row-hover hover:text-sidebar-foreground",
+        )}
+      >
+        <ProjectFavicon
+          environmentId={group.environmentId}
+          cwd={group.workspaceRoot}
+          faviconPath={group.faviconPath}
+          className="size-4 shrink-0"
+          fallbackIcon={FolderIcon}
+        />
+        <span className="min-w-0 flex-1 truncate font-medium">{group.displayName}</span>
+        {group.remoteEnvironmentLabels.length > 0 ? (
+          <span className="shrink-0 truncate text-xs text-muted-foreground/70">
+            {group.remoteEnvironmentLabels.join(", ")}
+          </span>
+        ) : null}
+        <span className="shrink-0 text-xs text-muted-foreground/55 tabular-nums">
+          {props.threadCount === 1 ? "1 thread" : `${props.threadCount} threads`}
+        </span>
+      </button>
+    </li>
+  );
+});
+
 export default function Sidebar() {
   const projects = useProjects();
   const projectOrder = useUiStateStore((store) => store.projectOrder);
@@ -2144,9 +2201,47 @@ export default function Sidebar() {
     () => searchSidebarThreadsByTitle(searchableThreads, threadSearchQuery),
     [searchableThreads, threadSearchQuery],
   );
-  const threadSearchResultOrderKey = threadSearchResults
-    .map((thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)))
-    .join("\0");
+  // Projects in the search: typed query matches by name; an empty, focused
+  // box lists the projects with the most recent activity. Selecting one
+  // scopes the sidebar to it (same as the project filter menu).
+  const [isSearchFocused, setIsSearchFocused] = useState(false);
+  const recentProjectGroups = useMemo(
+    () => sortLogicalProjectsForSidebar(unsortedProjectGroups, threads, "updated_at").slice(0, 6),
+    [threads, unsortedProjectGroups],
+  );
+  const projectSearchResults = useMemo(
+    () =>
+      isSearchingThreads
+        ? searchSidebarProjectsByName(projectGroups, threadSearchQuery, 5)
+        : isSearchFocused && projectGroups.length > 1
+          ? recentProjectGroups
+          : [],
+    [isSearchFocused, isSearchingThreads, projectGroups, recentProjectGroups, threadSearchQuery],
+  );
+  const threadCountByProjectKey = useMemo(() => {
+    const groupKeyByProjectRef = new Map(
+      projectGroups.flatMap((group) =>
+        group.memberProjectRefs.map(
+          (ref) => [`${ref.environmentId}:${ref.projectId}`, group.projectKey] as const,
+        ),
+      ),
+    );
+    const counts = new Map<string, number>();
+    for (const thread of threads) {
+      if (thread.archivedAt !== null) continue;
+      const key = groupKeyByProjectRef.get(`${thread.environmentId}:${thread.projectId}`);
+      if (!key) continue;
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return counts;
+  }, [projectGroups, threads]);
+  const searchResultCount = projectSearchResults.length + threadSearchResults.length;
+  const threadSearchResultOrderKey = [
+    ...projectSearchResults.map((group) => `p:${group.projectKey}`),
+    ...threadSearchResults.map((thread) =>
+      scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+    ),
+  ].join("\0");
 
   useEffect(() => {
     setActiveSearchResultIndex(0);
@@ -2372,33 +2467,48 @@ export default function Sidebar() {
     },
     [clearThreadSearch, navigateToThread],
   );
+  const selectProjectSearchResult = useCallback(
+    (group: SidebarProjectSnapshot) => {
+      clearThreadSearch();
+      setProjectScopeKey((current) => (current === group.projectKey ? null : group.projectKey));
+      threadSearchInputRef.current?.blur();
+    },
+    [clearThreadSearch],
+  );
   const handleThreadSearchKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLInputElement>) => {
       // IME composition (Japanese/Chinese input) uses the same keys; committing
       // a candidate must not move the highlight or navigate away mid-compose.
       if (event.nativeEvent.isComposing || event.keyCode === 229) return;
-      if (event.key === "Escape" && isSearchingThreads) {
+      if (event.key === "Escape") {
         event.preventDefault();
         event.stopPropagation();
-        clearThreadSearch();
+        if (isSearchingThreads) {
+          clearThreadSearch();
+        } else {
+          threadSearchInputRef.current?.blur();
+        }
         return;
       }
-      if (threadSearchResults.length === 0) return;
+      if (searchResultCount === 0) return;
       if (event.key === "ArrowDown") {
         event.preventDefault();
-        setActiveSearchResultIndex((index) => (index + 1) % threadSearchResults.length);
+        setActiveSearchResultIndex((index) => (index + 1) % searchResultCount);
         return;
       }
       if (event.key === "ArrowUp") {
         event.preventDefault();
-        setActiveSearchResultIndex(
-          (index) => (index - 1 + threadSearchResults.length) % threadSearchResults.length,
-        );
+        setActiveSearchResultIndex((index) => (index - 1 + searchResultCount) % searchResultCount);
         return;
       }
       if (event.key === "Enter") {
         event.preventDefault();
-        const result = threadSearchResults[activeSearchResultIndex];
+        const project = projectSearchResults[activeSearchResultIndex];
+        if (project) {
+          selectProjectSearchResult(project);
+          return;
+        }
+        const result = threadSearchResults[activeSearchResultIndex - projectSearchResults.length];
         if (result) selectThreadSearchResult(result);
       }
     },
@@ -2406,6 +2516,9 @@ export default function Sidebar() {
       activeSearchResultIndex,
       clearThreadSearch,
       isSearchingThreads,
+      projectSearchResults,
+      searchResultCount,
+      selectProjectSearchResult,
       selectThreadSearchResult,
       threadSearchResults,
     ],
@@ -3513,18 +3626,18 @@ export default function Sidebar() {
                     setActiveSearchResultIndex(0);
                   }}
                   onKeyDown={handleThreadSearchKeyDown}
-                  placeholder="Search"
-                  aria-label="Search threads"
+                  onFocus={() => setIsSearchFocused(true)}
+                  onBlur={() => setIsSearchFocused(false)}
+                  placeholder="Search threads and projects"
+                  aria-label="Search threads and projects"
                   role="combobox"
                   aria-autocomplete="list"
-                  aria-expanded={isSearchingThreads && threadSearchResults.length > 0}
+                  aria-expanded={searchResultCount > 0}
                   aria-controls={
-                    isSearchingThreads && threadSearchResults.length > 0
-                      ? "sidebar-thread-search-results"
-                      : undefined
+                    searchResultCount > 0 ? "sidebar-thread-search-results" : undefined
                   }
                   aria-activedescendant={
-                    isSearchingThreads && threadSearchResults[activeSearchResultIndex]
+                    searchResultCount > 0 && activeSearchResultIndex < searchResultCount
                       ? `sidebar-thread-search-result-${activeSearchResultIndex}`
                       : undefined
                   }
@@ -3764,6 +3877,33 @@ export default function Sidebar() {
         }
       >
         <SidebarGroup className="ps-[calc(var(--sidebar-content-inset)+1px)] pe-[var(--sidebar-content-inset)] pb-1 pt-0">
+          {projectSearchResults.length > 0 ? (
+            <div className="mb-1">
+              <p className="px-2.5 pb-0.5 pt-1 text-[11px] font-medium text-sidebar-muted-foreground">
+                {isSearchingThreads ? "Projects" : "Recent projects"}
+                <span className="font-normal"> · click to show only that project</span>
+              </p>
+              <ul
+                id={isSearchingThreads ? undefined : "sidebar-thread-search-results"}
+                role="listbox"
+                aria-label={isSearchingThreads ? "Project search results" : "Recent projects"}
+                className="flex flex-col gap-px"
+              >
+                {projectSearchResults.map((group, index) => (
+                  <SidebarProjectSearchRow
+                    key={group.projectKey}
+                    group={group}
+                    threadCount={threadCountByProjectKey.get(group.projectKey) ?? 0}
+                    isHighlighted={activeSearchResultIndex === index}
+                    isScoped={projectScopeKey === group.projectKey}
+                    resultId={`sidebar-thread-search-result-${index}`}
+                    onHighlight={() => setActiveSearchResultIndex(index)}
+                    onSelect={() => selectProjectSearchResult(group)}
+                  />
+                ))}
+              </ul>
+            </div>
+          ) : null}
           {isSearchingThreads ? (
             threadSearchResults.length > 0 ? (
               <TooltipProvider
@@ -3772,13 +3912,19 @@ export default function Sidebar() {
                 closeDelay={0}
                 timeout={400}
               >
+                {projectSearchResults.length > 0 ? (
+                  <p className="px-2.5 pb-0.5 pt-1 text-[11px] font-medium text-sidebar-muted-foreground">
+                    Threads
+                  </p>
+                ) : null}
                 <ul
                   id="sidebar-thread-search-results"
                   role="listbox"
                   aria-label="Thread search results"
                   className="flex flex-col gap-px"
                 >
-                  {threadSearchResults.map((thread, index) => {
+                  {threadSearchResults.map((thread, rowIndex) => {
+                    const index = rowIndex + projectSearchResults.length;
                     const threadKey = scopedThreadKey(
                       scopeThreadRef(thread.environmentId, thread.id),
                     );
@@ -3819,7 +3965,9 @@ export default function Sidebar() {
                 role="status"
                 className="px-2 py-6 text-center text-xs text-sidebar-muted-foreground"
               >
-                No threads found
+                {projectSearchResults.length > 0
+                  ? "No threads found"
+                  : "No threads or projects found"}
               </p>
             )
           ) : null}
