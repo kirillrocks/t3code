@@ -2978,7 +2978,7 @@ describe("PreviewManager", () => {
         attachmentId = yield* manager.registerWebview("tab_1", 42);
         yield* manager.setWebviewVisibility("tab_1", 42, attachmentId, true);
         const click = yield* manager
-          .automationClick("tab_1", { x: 120, y: 80 })
+          .automationClick("tab_1", 42, attachmentId, { x: 120, y: 80 })
           .pipe(Effect.forkChild({ startImmediately: true }));
         yield* TestClock.adjust(200);
         yield* Fiber.join(click);
@@ -3003,7 +3003,7 @@ describe("PreviewManager", () => {
         hideBeforeDispatch = true;
         yield* manager.setWebviewVisibility("tab_1", 42, attachmentId, true);
         const hiddenDuringAnimation = yield* manager
-          .automationClick("tab_1", { x: 120, y: 80 })
+          .automationClick("tab_1", 42, attachmentId, { x: 120, y: 80 })
           .pipe(Effect.forkChild({ startImmediately: true }));
         yield* TestClock.adjust(200);
         expect(yield* Fiber.join(hiddenDuringAnimation)).toEqual({
@@ -3027,13 +3027,124 @@ describe("PreviewManager", () => {
         fromId.mockReturnValue(wc as never);
 
         yield* manager.createTab("tab_hidden");
-        yield* manager.registerWebview("tab_hidden", 42);
-        expect(yield* manager.automationClick("tab_hidden", { x: 120, y: 80 })).toEqual({
+        const attachmentId = yield* manager.registerWebview("tab_hidden", 42);
+        expect(
+          yield* manager.automationClick("tab_hidden", 42, attachmentId, { x: 120, y: 80 }),
+        ).toEqual({
           _tag: "NotSent",
           reason: "tab-not-visible",
         });
         expect(wc.debugger.attach).not.toHaveBeenCalled();
         expect(wc.debugger.sendCommand).not.toHaveBeenCalled();
+      }),
+    ),
+  );
+
+  effectIt.effect("does not retarget a click to a replacement webview before dispatch starts", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        const initial = makeTestPreviewWebContents(
+          async () => ({
+            toJPEG: () => Buffer.from("unused"),
+            getSize: () => ({ width: 800, height: 600 }),
+          }),
+          42,
+        ) as unknown as Electron.WebContents;
+        const replacement = makeTestPreviewWebContents(
+          async () => ({
+            toJPEG: () => Buffer.from("unused"),
+            getSize: () => ({ width: 800, height: 600 }),
+          }),
+          43,
+        ) as unknown as Electron.WebContents;
+        fromId.mockImplementation((id?: number) =>
+          id === 42 ? (initial as never) : id === 43 ? (replacement as never) : null,
+        );
+
+        yield* manager.createTab("tab_replaced_before_click");
+        const initialAttachmentId = yield* manager.registerWebview("tab_replaced_before_click", 42);
+        yield* manager.setWebviewVisibility(
+          "tab_replaced_before_click",
+          42,
+          initialAttachmentId,
+          true,
+        );
+        yield* manager.registerWebview("tab_replaced_before_click", 43);
+
+        expect(
+          yield* manager.automationClick("tab_replaced_before_click", 42, initialAttachmentId, {
+            x: 120,
+            y: 80,
+          }),
+        ).toEqual({ _tag: "NotSent", reason: "tab-not-visible" });
+        expect(initial.debugger.attach).not.toHaveBeenCalled();
+        expect(replacement.debugger.attach).not.toHaveBeenCalled();
+      }),
+    ),
+  );
+
+  effectIt.effect("does not retarget a click when the attachment changes during animation", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        const sendCommand = vi.fn(async (method: string) =>
+          method === "Runtime.evaluate"
+            ? { result: { value: { width: 800, height: 600 } } }
+            : undefined,
+        );
+        const initial = makeTestPreviewWebContents(
+          async () => ({
+            toJPEG: () => Buffer.from("unused"),
+            getSize: () => ({ width: 800, height: 600 }),
+          }),
+          42,
+        ) as unknown as Electron.WebContents;
+        initial.isDevToolsOpened = () => false;
+        initial.debugger.detach = vi.fn();
+        initial.debugger.sendCommand = sendCommand;
+        const replacement = makeTestPreviewWebContents(
+          async () => ({
+            toJPEG: () => Buffer.from("unused"),
+            getSize: () => ({ width: 800, height: 600 }),
+          }),
+          43,
+        ) as unknown as Electron.WebContents;
+        replacement.isDevToolsOpened = () => false;
+        replacement.debugger.detach = vi.fn();
+        fromId.mockImplementation((id?: number) =>
+          id === 42 ? (initial as never) : id === 43 ? (replacement as never) : null,
+        );
+
+        yield* manager.createTab("tab_replaced_during_click");
+        const initialAttachmentId = yield* manager.registerWebview("tab_replaced_during_click", 42);
+        yield* manager.setWebviewVisibility(
+          "tab_replaced_during_click",
+          42,
+          initialAttachmentId,
+          true,
+        );
+        yield* manager.subscribePointerEvents((event) =>
+          event.phase === "click"
+            ? manager
+                .registerWebview("tab_replaced_during_click", 43)
+                .pipe(Effect.asVoid, Effect.orDie)
+            : Effect.void,
+        );
+
+        const click = yield* manager
+          .automationClick("tab_replaced_during_click", 42, initialAttachmentId, {
+            x: 120,
+            y: 80,
+          })
+          .pipe(Effect.forkChild({ startImmediately: true }));
+        yield* TestClock.adjust(200);
+
+        expect(yield* Fiber.join(click)).toEqual({
+          _tag: "NotSent",
+          reason: "tab-not-visible",
+        });
+        expect(
+          sendCommand.mock.calls.some(([method]) => method === "Input.dispatchMouseEvent"),
+        ).toBe(false);
       }),
     ),
   );
@@ -3266,7 +3377,7 @@ describe("PreviewManager", () => {
         yield* manager.setWebviewVisibility("tab_1", 42, attachmentId, true);
 
         const click = yield* manager
-          .automationClick("tab_1", { x: 120, y: 80 })
+          .automationClick("tab_1", 42, attachmentId, { x: 120, y: 80 })
           .pipe(Effect.forkChild({ startImmediately: true }));
         yield* TestClock.adjust(200);
         const exit = yield* Fiber.await(click);

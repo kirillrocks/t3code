@@ -3300,16 +3300,27 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
   });
 
   const assertAutomationClickVisible = Effect.fn("PreviewManager.assertAutomationClickVisible")(
-    function* (tabId: string, wc: Electron.WebContents, attachment: ManagedListeners) {
+    function* (
+      tabId: string,
+      wc: Electron.WebContents,
+      attachment: ManagedListeners,
+      attachmentId: DesktopPreviewWebviewAttachmentId,
+    ) {
       const tab = (yield* SynchronizedRef.get(tabsRef)).get(tabId);
       const currentAttachment = (yield* Ref.get(attachedRef)).get(wc.id);
       if (
         tab?.webContentsId !== wc.id ||
         webContents.fromId(wc.id) !== wc ||
         currentAttachment !== attachment ||
+        attachment.attachmentId !== attachmentId ||
+        wc.isDestroyed() ||
         !attachment.presentation.active
       ) {
-        return yield* new PreviewWebContentsNotFoundError({ tabId, webContentsId: wc.id });
+        return yield* new PreviewAutomationTabNotVisibleError({
+          operation: "click",
+          tabId,
+          webContentsId: wc.id,
+        });
       }
       if (!attachment.presentation.visible) {
         return yield* new PreviewAutomationTabNotVisibleError({
@@ -3326,10 +3337,11 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     wc: Electron.WebContents,
     input: PreviewAutomationClickInput,
     attachment: ManagedListeners,
+    attachmentId: DesktopPreviewWebviewAttachmentId,
     send: SendCommand,
   ) {
     yield* attachment.presentation.semaphore.withPermit(
-      assertAutomationClickVisible(tabId, wc, attachment),
+      assertAutomationClickVisible(tabId, wc, attachment, attachmentId),
     );
     yield* prepareAutomationInput(send, true);
     const point = yield* resolveClickPoint(tabId, send, input);
@@ -3370,7 +3382,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     yield* Effect.sleep(AGENT_CURSOR_CLICK_LEAD_MS);
     yield* attachment.presentation.semaphore.withPermit(
       Effect.gen(function* () {
-        yield* assertAutomationClickVisible(tabId, wc, attachment);
+        yield* assertAutomationClickVisible(tabId, wc, attachment, attachmentId);
         yield* expectAgentInput(tabId, { kind: "pointer", ...point, button: 0 });
         yield* send("Input.dispatchMouseEvent", {
           type: "mousePressed",
@@ -3390,25 +3402,33 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
 
   const automationClick = Effect.fn("PreviewManager.automationClick")(function* (
     tabId: string,
+    webContentsId: number,
+    attachmentId: DesktopPreviewWebviewAttachmentId,
     input: PreviewAutomationClickInput,
   ) {
-    const wc = yield* requireWebContents(tabId);
-    const attachment = (yield* Ref.get(attachedRef)).get(wc.id);
-    if (attachment?.webContents !== wc) {
-      return yield* new PreviewWebContentsNotFoundError({ tabId, webContentsId: wc.id });
+    const wc = webContents.fromId(webContentsId);
+    const attachment = (yield* Ref.get(attachedRef)).get(webContentsId);
+    if (
+      !wc ||
+      wc.isDestroyed() ||
+      attachment?.webContents !== wc ||
+      attachment.attachmentId !== attachmentId
+    ) {
+      return { _tag: "NotSent", reason: "tab-not-visible" } as const;
     }
     return yield* Effect.gen(function* () {
       yield* attachment.presentation.semaphore.withPermit(
-        assertAutomationClickVisible(tabId, wc, attachment),
+        assertAutomationClickVisible(tabId, wc, attachment, attachmentId),
       );
       yield* withControlSession(tabId, wc, "click", (send) =>
-        performAutomationClick(tabId, wc, input, attachment, send),
+        performAutomationClick(tabId, wc, input, attachment, attachmentId, send),
       );
       return { _tag: "Dispatched" } as const;
     }).pipe(
-      Effect.catchTag("PreviewAutomationTabNotVisibleError", () =>
-        Effect.succeed({ _tag: "NotSent", reason: "tab-not-visible" } as const),
-      ),
+      Effect.catchTags({
+        PreviewAutomationTabNotVisibleError: () =>
+          Effect.succeed({ _tag: "NotSent", reason: "tab-not-visible" } as const),
+      }),
     );
   });
 
@@ -4218,6 +4238,8 @@ export class PreviewManager extends Context.Service<
     ) => Effect.Effect<PreviewAutomationSnapshot, PreviewManagerError>;
     readonly automationClick: (
       tabId: string,
+      webContentsId: number,
+      attachmentId: DesktopPreviewWebviewAttachmentId,
       input: PreviewAutomationClickInput,
     ) => Effect.Effect<DesktopPreviewAutomationClickResult, PreviewManagerError>;
     readonly automationType: (

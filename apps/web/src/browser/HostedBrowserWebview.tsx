@@ -67,14 +67,11 @@ export function HostedBrowserWebview(props: {
         fittedSourceContent: current?.fittedSourceContent ?? null,
         rect: resolveBrowserSurfacePanelRect(state.byTabId, runtimeTabId),
         visible: current?.visible ?? false,
-        automationClickHolds: current?.automationClickHolds ?? 0,
       };
     }),
   );
   usePreviewBridge({ threadRef, tabId, runtimeTabId });
-  const desiredActive = presentation.visible && presentation.rect !== null;
-  const active =
-    (desiredActive || presentation.automationClickHolds > 0) && presentation.rect !== null;
+  const active = presentation.visible && presentation.rect !== null;
   const lastRect = presentation.rect;
   const activeRef = useRef(active);
   const registeredWebviewRef = useRef<{

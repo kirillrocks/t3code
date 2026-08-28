@@ -1055,7 +1055,8 @@ export const DesktopPreviewRecordingSaveInputSchema = Schema.Struct({
 });
 
 export const DesktopPreviewAutomationClickInputSchema = Schema.Struct({
-  tabId: DesktopPreviewTabIdSchema,
+  ...DesktopPreviewRegisterWebviewInputSchema.fields,
+  attachmentId: DesktopPreviewWebviewAttachmentIdSchema,
   input: PreviewAutomationClickInput,
 });
 
@@ -1266,6 +1267,8 @@ export interface DesktopPreviewBridge {
     click: (
       tabId: string,
       input: PreviewAutomationClickInput,
+      webContentsId: number,
+      attachmentId: DesktopPreviewWebviewAttachmentId,
     ) => Promise<DesktopPreviewAutomationClickResult | void>;
     type: (tabId: string, input: PreviewAutomationTypeInput) => Promise<void>;
     press: (tabId: string, input: PreviewAutomationPressInput) => Promise<void>;

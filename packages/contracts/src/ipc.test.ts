@@ -1,7 +1,10 @@
 import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 
-import { DesktopEnvironmentBootstrapSchema } from "./ipc.ts";
+import {
+  DesktopEnvironmentBootstrapSchema,
+  DesktopPreviewAutomationClickInputSchema,
+} from "./ipc.ts";
 
 describe("DesktopEnvironmentBootstrapSchema", () => {
   const decode = Schema.decodeUnknownSync(DesktopEnvironmentBootstrapSchema);
@@ -34,5 +37,21 @@ describe("DesktopEnvironmentBootstrapSchema", () => {
         wsBaseUrl: null,
       }).runningDistro,
     ).toBeNull();
+  });
+});
+
+describe("DesktopPreviewAutomationClickInputSchema", () => {
+  const decode = Schema.decodeUnknownSync(DesktopPreviewAutomationClickInputSchema);
+  const input = {
+    tabId: "tab-1",
+    webContentsId: 42,
+    attachmentId: "preview-attachment-1",
+    input: { x: 10, y: 20 },
+  };
+
+  it("requires the exact webview attachment identity", () => {
+    expect(decode(input)).toEqual(input);
+    expect(() => decode({ ...input, webContentsId: undefined })).toThrow();
+    expect(() => decode({ ...input, attachmentId: undefined })).toThrow();
   });
 });

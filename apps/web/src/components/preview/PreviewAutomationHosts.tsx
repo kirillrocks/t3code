@@ -5,7 +5,9 @@ import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime"
 import {
   FILL_PREVIEW_VIEWPORT,
   PREVIEW_AUTOMATION_OPERATIONS,
+  type DesktopPreviewBridge,
   type EnvironmentId,
+  type PreviewAutomationClickInput,
   type PreviewAutomationNavigateInput,
   type PreviewAutomationOpenInput,
   type PreviewAutomationResizeInput,
@@ -37,10 +39,7 @@ import {
   stopBrowserRecording,
 } from "~/browser/browserRecording";
 import { resolveBrowserRecordingStopTarget } from "~/browser/browserRecordingScope";
-import {
-  acquireBrowserSurfaceClickPresentation,
-  useBrowserSurfaceStore,
-} from "~/browser/browserSurfaceStore";
+import { useBrowserSurfaceStore } from "~/browser/browserSurfaceStore";
 import { browserDefaultOpenViewport, resolveBrowserDefaults } from "~/browser/browserDefaults";
 import { runBrowserViewportMutation } from "~/browser/browserViewportActions";
 import { previewRuntimeTabId } from "~/browser/previewRuntimeTabId";
@@ -137,6 +136,100 @@ const readPreviewWebviewRegistration = (
     ? { attachmentId, webContentsId }
     : null;
 };
+
+type PreviewAutomationClickContext = Parameters<typeof confirmPreviewAutomationClickDispatched>[1];
+
+export async function clickVisiblePreview(
+  runtimeTabId: string,
+  input: PreviewAutomationClickInput,
+  bridge: DesktopPreviewBridge,
+  context: PreviewAutomationClickContext,
+) {
+  const presentation = useBrowserSurfaceStore.getState().byTabId[runtimeTabId];
+  if (!presentation?.visible || presentation.owner === null) {
+    throw new PreviewAutomationTabNotVisibleHostError(context);
+  }
+
+  const presentationOwner = presentation.owner;
+  const webview = findPreviewWebview(runtimeTabId);
+  const registration = readPreviewWebviewRegistration(webview);
+  const setWebviewVisibility = bridge.setWebviewVisibility;
+  if (!webview || !registration || !setWebviewVisibility) {
+    throw new PreviewAutomationTargetUnavailableError({
+      ...context,
+      bridgeAvailable: Boolean(setWebviewVisibility),
+    });
+  }
+
+  let invalidated = false;
+  const targetIsCurrent = () => {
+    const currentPresentation = useBrowserSurfaceStore.getState().byTabId[runtimeTabId];
+    const currentWebview = findPreviewWebview(runtimeTabId);
+    const currentRegistration = readPreviewWebviewRegistration(currentWebview);
+    return (
+      currentPresentation?.visible === true &&
+      currentPresentation.owner === presentationOwner &&
+      currentWebview === webview &&
+      currentRegistration?.webContentsId === registration.webContentsId &&
+      currentRegistration.attachmentId === registration.attachmentId
+    );
+  };
+  const setCapturedWebviewHidden = () => {
+    webview.removeAttribute("data-preview-main-visible");
+    return setWebviewVisibility(
+      runtimeTabId,
+      registration.webContentsId,
+      registration.attachmentId,
+      false,
+    ).catch(() => undefined);
+  };
+  const invalidate = () => {
+    if (invalidated) return;
+    invalidated = true;
+    void setCapturedWebviewHidden();
+  };
+  const unsubscribe = useBrowserSurfaceStore.subscribe((state) => {
+    const current = state.byTabId[runtimeTabId];
+    if (!current?.visible || current.owner !== presentationOwner) invalidate();
+  });
+
+  try {
+    if (!targetIsCurrent()) {
+      invalidate();
+      await setCapturedWebviewHidden();
+      throw new PreviewAutomationTabNotVisibleHostError(context);
+    }
+    try {
+      await setWebviewVisibility(
+        runtimeTabId,
+        registration.webContentsId,
+        registration.attachmentId,
+        true,
+      );
+    } catch (cause) {
+      if (!invalidated && targetIsCurrent()) throw cause;
+      await setCapturedWebviewHidden();
+      throw new PreviewAutomationTabNotVisibleHostError(context);
+    }
+    if (invalidated || !targetIsCurrent()) {
+      invalidate();
+      // This second false starts after the true acknowledgement, so a hide
+      // during that acknowledgement cannot leave the old attachment visible.
+      await setCapturedWebviewHidden();
+      throw new PreviewAutomationTabNotVisibleHostError(context);
+    }
+    webview.setAttribute("data-preview-main-visible", "true");
+    const result = await bridge.automation.click(
+      runtimeTabId,
+      input,
+      registration.webContentsId,
+      registration.attachmentId,
+    );
+    return confirmPreviewAutomationClickDispatched(result, context);
+  } finally {
+    unsubscribe();
+  }
+}
 
 const readWebviewViewport = async (
   webview: ExecutablePreviewWebview,
@@ -611,51 +704,18 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
           }
           case "click": {
             const ready = await requireReadyTab();
-            const presentationLease = acquireBrowserSurfaceClickPresentation(ready.runtimeTabId);
-            if (!presentationLease) {
-              throw new PreviewAutomationTabNotVisibleHostError({
+            return await clickVisiblePreview(
+              ready.runtimeTabId,
+              request.input as PreviewAutomationClickInput,
+              ready.bridge,
+              {
                 requestId: request.requestId,
                 operation: request.operation,
                 environmentId,
                 threadId: request.threadId,
                 tabId: ready.tabId,
-              });
-            }
-            try {
-              const registration = readPreviewWebviewRegistration(
-                findPreviewWebview(ready.runtimeTabId),
-              );
-              const setWebviewVisibility = ready.bridge.setWebviewVisibility;
-              if (!registration || !setWebviewVisibility) {
-                throw new PreviewAutomationTargetUnavailableError({
-                  requestId: request.requestId,
-                  operation: request.operation,
-                  environmentId,
-                  threadId: request.threadId,
-                  tabId: ready.tabId,
-                  bridgeAvailable: Boolean(setWebviewVisibility),
-                });
-              }
-              await setWebviewVisibility(
-                ready.runtimeTabId,
-                registration.webContentsId,
-                registration.attachmentId,
-                true,
-              );
-              const result = await ready.bridge.automation.click(
-                ready.runtimeTabId,
-                request.input as Parameters<typeof ready.bridge.automation.click>[1],
-              );
-              return confirmPreviewAutomationClickDispatched(result, {
-                requestId: request.requestId,
-                operation: request.operation,
-                environmentId,
-                threadId: request.threadId,
-                tabId: ready.tabId,
-              });
-            } finally {
-              presentationLease.release();
-            }
+              },
+            );
           }
           case "type": {
             const ready = await requireReadyTab();

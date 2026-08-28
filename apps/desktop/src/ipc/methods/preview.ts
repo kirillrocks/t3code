@@ -322,9 +322,14 @@ export const automationClick = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.PREVIEW_AUTOMATION_CLICK_CHANNEL,
   payload: DesktopPreviewAutomationClickInputSchema,
   result: DesktopPreviewAutomationClickResultSchema,
-  handler: Effect.fn("desktop.ipc.preview.automationClick")(function* ({ tabId, input }) {
+  handler: Effect.fn("desktop.ipc.preview.automationClick")(function* ({
+    tabId,
+    webContentsId,
+    attachmentId,
+    input,
+  }) {
     const manager = yield* PreviewManager.PreviewManager;
-    return yield* manager.automationClick(tabId, input);
+    return yield* manager.automationClick(tabId, webContentsId, attachmentId, input);
   }),
 });
 

@@ -131,10 +131,19 @@ describe("preview IPC methods", () => {
         Effect.succeed({ _tag: "NotSent", reason: "tab-not-visible" } as const),
       );
       const result = yield* PreviewIpc.automationClick
-        .handler({ tabId: "tab-1", input: { x: 10, y: 20 } })
+        .handler({
+          tabId: "tab-1",
+          webContentsId: 42,
+          attachmentId: "preview-attachment-1",
+          input: { x: 10, y: 20 },
+        })
         .pipe(Effect.provideService(PreviewManager.PreviewManager, { automationClick } as never));
 
       expect(result).toEqual({ _tag: "NotSent", reason: "tab-not-visible" });
+      expect(automationClick).toHaveBeenCalledWith("tab-1", 42, "preview-attachment-1", {
+        x: 10,
+        y: 20,
+      });
     }),
   );
 });
