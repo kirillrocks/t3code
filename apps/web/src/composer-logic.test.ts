@@ -67,6 +67,42 @@ describe("composerSubmissionIntentForEnter", () => {
       }),
     ).toBe("foreground");
   });
+
+  it("queues plain Enter while a turn runs", () => {
+    expect(
+      composerSubmissionIntentForEnter({
+        isMobileViewport: false,
+        shiftKey: false,
+        modifierKey: false,
+        isDraftThread: false,
+        isTurnRunning: true,
+      }),
+    ).toBe("queue");
+  });
+
+  it("sends Mod+Enter straight into the running turn", () => {
+    expect(
+      composerSubmissionIntentForEnter({
+        isMobileViewport: false,
+        shiftKey: false,
+        modifierKey: true,
+        isDraftThread: false,
+        isTurnRunning: true,
+      }),
+    ).toBe("foreground");
+  });
+
+  it("never queues on a draft thread", () => {
+    expect(
+      composerSubmissionIntentForEnter({
+        isMobileViewport: false,
+        shiftKey: false,
+        modifierKey: false,
+        isDraftThread: true,
+        isTurnRunning: true,
+      }),
+    ).toBe("foreground");
+  });
 });
 
 describe("detectComposerTrigger", () => {

@@ -10,6 +10,23 @@ becomes available after every upload finishes. Failed uploads can be retried or 
 On web and desktop, HEIC and HEIF photos are automatically converted to JPEG when you drag them into
 the composer or paste them into a message.
 
+## Queue messages while the agent works
+
+While a turn is running, Enter (or the send button) queues your message instead of sending it. The
+queue shows above the composer, one line per message, in send order. When the agent finishes, T3
+Code sends the first queued message as a new turn, waits for that turn to finish, then sends the
+next one.
+
+- **Ctrl+Enter** (Cmd+Enter on macOS) sends right away, into the running turn.
+- Hover a queued message for **Send now**, **Edit** (moves it back into the composer), and
+  **Remove**. **Clear** empties the queue.
+- **Stop** pauses the queue. Choose **Resume**, or send a message by hand, to continue.
+- A message that fails to send stays first in the queue with the reason. Send it again or remove
+  it; the messages behind it wait.
+
+Queued messages live in this browser or desktop app until they are sent. Keep it open; another
+device does not see them.
+
 ## Commands and skills
 
 Type `/` to open the command menu. Type `$` to find and add a skill. Skill rows show their source,

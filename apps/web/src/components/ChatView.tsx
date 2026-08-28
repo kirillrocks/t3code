@@ -236,6 +236,7 @@ import {
   markPromotedDraftThreadByRef,
   useComposerDraftStore,
   type DraftId,
+  type PersistedComposerImageAttachment,
 } from "../composerDraftStore";
 import {
   appendTerminalContextsToPrompt,
@@ -377,6 +378,10 @@ import { sanitizeThreadErrorMessage } from "~/rpc/transportError";
 import { RightPanelSheet } from "./RightPanelSheet";
 import { previewEnvironment } from "../state/preview";
 import { useAtomCommand } from "../state/use-atom-command";
+import { composerQueueThreadKey, useComposerQueueStore } from "../composerQueueStore";
+import { useComposerQueueDispatcher } from "../composerQueue/useComposerQueueDispatcher";
+import { compressImageForStash } from "../lib/imageCompression";
+import { partitionStashAttachments } from "../promptStashStore";
 import { Button } from "./ui/button";
 import {
   AlertDialog,
@@ -1298,6 +1303,7 @@ function ChatViewContent(props: ChatViewProps) {
     reportFailure: false,
   });
   const startThreadTurn = useAtomCommand(threadEnvironment.startTurn, { reportFailure: false });
+  const dispatchComposerQueueEntry = useComposerQueueDispatcher();
   const uploadThreadFeedback = useAtomCommand(threadEnvironment.uploadFeedback, {
     reportFailure: false,
   });
@@ -5634,6 +5640,71 @@ function ChatViewContent(props: ChatViewProps) {
       return;
     }
 
+    // Queue instead of send: the message waits in this browser and goes out
+    // as its own turn once the running one finishes (see
+    // composerQueue/useComposerQueueDrain). Text is finalized here so the
+    // drain does not need the composer; images are encoded after the
+    // composer clears, like the stash does.
+    if (submissionIntent === "queue" && isServerThread) {
+      const queueStore = useComposerQueueStore.getState();
+      const queueEntryId = newMessageId();
+      const queueThreadKey = composerQueueThreadKey(activeThread.environmentId, threadIdForSend);
+      const queuedImages = [...composerImages];
+      const written = queueStore.enqueue({
+        id: queueEntryId,
+        threadKey: queueThreadKey,
+        environmentId: activeThread.environmentId,
+        threadId: threadIdForSend,
+        createdAt: new Date().toISOString(),
+        prompt: promptForSend,
+        text: outgoingMessageText,
+        attachments: [],
+        droppedImageNames: [],
+        ...(queuedImages.length > 0 ? { pendingImages: true } : {}),
+        status: "queued",
+      });
+      if (!written) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not queue this message",
+            description: "Browser storage rejected the write. Send it with Ctrl+Enter instead.",
+          }),
+        );
+        return;
+      }
+      promptRef.current = "";
+      clearComposerDraftContent(composerDraftTarget);
+      composerRef.current?.resetCursorState();
+      if (queuedImages.length > 0) {
+        void (async () => {
+          const encoded: PersistedComposerImageAttachment[] = [];
+          const droppedImageNames: string[] = [];
+          for (const image of queuedImages) {
+            const result = await compressImageForStash(image.file);
+            if (!result.ok) {
+              droppedImageNames.push(image.name);
+              continue;
+            }
+            encoded.push({
+              id: image.id,
+              name: image.name,
+              mimeType: result.image.mimeType,
+              sizeBytes: result.image.sizeBytes,
+              dataUrl: result.image.dataUrl,
+            });
+          }
+          const { kept, droppedNames } = partitionStashAttachments(encoded);
+          useComposerQueueStore.getState().update(queueEntryId, {
+            attachments: kept,
+            droppedImageNames: [...droppedImageNames, ...droppedNames],
+            pendingImages: false,
+          });
+        })();
+      }
+      return;
+    }
+
     sendInFlightRef.current = true;
     if (supportsAttachmentUploads && composerImagesSnapshot.length > 0) {
       for (const image of composerImagesSnapshot) {
@@ -5881,6 +5952,13 @@ function ChatViewContent(props: ChatViewProps) {
         failure = startResult;
       } else {
         turnStartSucceeded = true;
+        // A message sent by hand resumes a queue paused by Stop.
+        useComposerQueueStore
+          .getState()
+          .setThreadPaused(
+            composerQueueThreadKey(activeThread.environmentId, threadIdForSend),
+            false,
+          );
         if (supportsAttachmentUploads) {
           releaseAttachmentUploads(composerImagesSnapshot);
         }
@@ -6002,8 +6080,22 @@ function ChatViewContent(props: ChatViewProps) {
     }
   };
 
+  const onSendQueuedNow = useCallback(
+    (entryId: string) => {
+      void dispatchComposerQueueEntry(entryId);
+    },
+    [dispatchComposerQueueEntry],
+  );
+
   const onInterrupt = async () => {
     if (!activeThread) return;
+    // Stop means "I want control": hold queued messages until the user
+    // resumes the queue or sends something by hand.
+    const queueThreadKey = composerQueueThreadKey(activeThread.environmentId, activeThread.id);
+    const queueStore = useComposerQueueStore.getState();
+    if (queueStore.entries.some((entry) => entry.threadKey === queueThreadKey)) {
+      queueStore.setThreadPaused(queueThreadKey, true);
+    }
     const result = await interruptThreadTurn({
       environmentId,
       input: buildThreadTurnInterruptInput(activeThread),
@@ -7086,6 +7178,7 @@ function ChatViewContent(props: ChatViewProps) {
                             composerElementContextsRef={composerElementContextsRef}
                             onSend={onSend}
                             onInterrupt={onInterrupt}
+                            onSendQueuedNow={onSendQueuedNow}
                             onImplementPlanInNewThread={onImplementPlanInNewThread}
                             onRespondToApproval={onRespondToApproval}
                             onSelectActivePendingUserInputOption={

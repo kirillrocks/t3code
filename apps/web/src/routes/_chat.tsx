@@ -3,6 +3,7 @@ import { useAtomValue } from "@effect/atom-react";
 import { useEffect, useMemo } from "react";
 
 import { isCommandPaletteOpen } from "../commandPaletteBus";
+import { useComposerQueueDrain } from "../composerQueue/useComposerQueueDrain";
 import { useClientSettings, useLegacySidebarEnabled } from "../hooks/useSettings";
 import { openCommandPalette } from "../commandPaletteBus";
 import { useProjects } from "../state/entities";
@@ -174,10 +175,16 @@ function ChatRouteGlobalShortcuts() {
   return null;
 }
 
+function ChatRouteQueueDrain() {
+  useComposerQueueDrain();
+  return null;
+}
+
 function ChatRouteLayout() {
   return (
     <>
       <ChatRouteGlobalShortcuts />
+      <ChatRouteQueueDrain />
       <Outlet />
     </>
   );

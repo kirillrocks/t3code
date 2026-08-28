@@ -3,7 +3,13 @@ import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from "./lib/terminalContext";
 
 export type ComposerTriggerKind = "path" | "slash-command" | "skill";
 export type ComposerSlashCommand = "model" | "plan" | "default";
-export type ComposerSubmissionIntent = "foreground" | "background";
+/**
+ * foreground: send now. background: start a draft thread without opening it.
+ * queue: hold the message in this browser until the running turn finishes,
+ * then send it (Enter while the agent works). Ctrl/Cmd+Enter while the agent
+ * works stays "foreground", which steers the running turn.
+ */
+export type ComposerSubmissionIntent = "foreground" | "background" | "queue";
 
 export interface ComposerTrigger {
   kind: ComposerTriggerKind;
@@ -17,9 +23,14 @@ export function composerSubmissionIntentForEnter(input: {
   shiftKey: boolean;
   modifierKey: boolean;
   isDraftThread: boolean;
+  /** A turn is running on this thread: plain Enter queues, Mod+Enter sends now. */
+  isTurnRunning?: boolean;
 }): ComposerSubmissionIntent | null {
   if (input.isMobileViewport || input.shiftKey) {
     return null;
+  }
+  if (input.isTurnRunning && !input.isDraftThread) {
+    return input.modifierKey ? "foreground" : "queue";
   }
   return input.modifierKey && input.isDraftThread ? "background" : "foreground";
 }

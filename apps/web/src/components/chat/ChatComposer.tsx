@@ -67,6 +67,13 @@ import {
 } from "../../promptStashStore";
 import { ComposerStashBadge } from "./ComposerStashBadge";
 import { ComposerStashMenu } from "./ComposerStashMenu";
+import { ComposerQueuePanel } from "./ComposerQueuePanel";
+import {
+  composerQueueThreadKey,
+  selectComposerQueueEntriesForThread,
+  useComposerQueueStore,
+  type ComposerQueueEntry,
+} from "../../composerQueueStore";
 import {
   ComposerTasksBadge,
   ComposerTasksDrawer,
@@ -458,6 +465,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   hasSendableContent: boolean;
   preserveComposerFocusOnPointerDown?: boolean;
   showSendWhileRunning?: boolean;
+  queueMode?: boolean;
   onPreviousPendingQuestion: () => void;
   onInterrupt: () => void;
   onImplementPlanInNewThread: () => void;
@@ -493,6 +501,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
         hasSendableContent={props.hasSendableContent}
         preserveComposerFocusOnPointerDown={props.preserveComposerFocusOnPointerDown ?? false}
         showSendWhileRunning={props.showSendWhileRunning ?? false}
+        queueMode={props.queueMode ?? false}
         onPreviousPendingQuestion={props.onPreviousPendingQuestion}
         onInterrupt={props.onInterrupt}
         onImplementPlanInNewThread={props.onImplementPlanInNewThread}
@@ -637,6 +646,8 @@ export interface ChatComposerProps {
   // Callbacks
   onSend: (e?: { preventDefault: () => void }, intent?: ComposerSubmissionIntent) => void;
   onInterrupt: () => void;
+  /** Sends a queued message right away (steers the running turn). */
+  onSendQueuedNow: (entryId: string) => void;
   onImplementPlanInNewThread: () => void;
   onRespondToApproval: (
     requestId: ApprovalRequestId,
@@ -725,6 +736,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     composerElementContextsRef,
     onSend,
     onInterrupt,
+    onSendQueuedNow,
     onImplementPlanInNewThread,
     onRespondToApproval,
     onSelectActivePendingUserInputOption,
@@ -1995,6 +2007,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       shouldBlurMobileComposerOnSubmit,
     ],
   );
+  const isQueueMode = routeKind === "server" && phase === "running";
+  // The form's submit (send button, mobile tap) queues while a turn runs;
+  // only Ctrl/Cmd+Enter (handled in onComposerCommandKey) sends now.
+  const submitComposerFromForm = useCallback(
+    (event?: { preventDefault: () => void }) => {
+      submitComposer(event, isQueueMode ? "queue" : "foreground");
+    },
+    [isQueueMode, submitComposer],
+  );
   const compactThreadContext = useCallback(() => {
     if (
       compactDisabled ||
@@ -2107,6 +2128,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             shiftKey: event.shiftKey,
             modifierKey: event.metaKey || event.ctrlKey,
             isDraftThread: routeKind === "draft",
+            isTurnRunning: phase === "running",
           })
         : null;
     if (submissionIntent) {
@@ -2147,6 +2169,104 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       setStashPulse((current) => ({ ...current, active: false }));
     }, 1200);
   }, []);
+
+  // ------------------------------------------------------------------
+  // Message queue (Enter while a turn runs)
+  // ------------------------------------------------------------------
+  const queueThreadKey =
+    routeKind === "server"
+      ? composerQueueThreadKey(props.routeThreadRef.environmentId, props.routeThreadRef.threadId)
+      : null;
+  const queueEntriesSelector = useMemo(
+    () => selectComposerQueueEntriesForThread(queueThreadKey),
+    [queueThreadKey],
+  );
+  const queueEntries = useComposerQueueStore(queueEntriesSelector);
+  const queuePaused = useComposerQueueStore((state) =>
+    queueThreadKey !== null ? state.pausedThreadKeys.includes(queueThreadKey) : false,
+  );
+  const takeQueueEntry = useComposerQueueStore((state) => state.take);
+  const clearQueueThread = useComposerQueueStore((state) => state.clearThread);
+  const setQueueThreadPaused = useComposerQueueStore((state) => state.setThreadPaused);
+
+  /** Edit: pull the message back into the composer. Enter re-queues it at the end. */
+  const editQueueEntry = useCallback(
+    (entry: ComposerQueueEntry) => {
+      const taken = takeQueueEntry(entry.id);
+      if (!taken) return;
+      const currentPrompt = promptRef.current;
+      const nextPrompt =
+        taken.prompt.length === 0
+          ? currentPrompt
+          : currentPrompt.trim().length
+            ? `${currentPrompt.replace(/\s+$/, "")}\n\n${taken.prompt}`
+            : taken.prompt;
+      if (nextPrompt !== currentPrompt) {
+        promptRef.current = nextPrompt;
+        setComposerDraftPrompt(composerDraftTarget, nextPrompt);
+        setComposerCursor(collapseExpandedComposerCursor(nextPrompt, nextPrompt.length));
+        setComposerTrigger(null);
+      }
+      if (taken.attachments.length > 0) {
+        const existingIds = new Set(composerImagesRef.current.map((image) => image.id));
+        const capacity = Math.max(
+          0,
+          PROVIDER_SEND_TURN_MAX_ATTACHMENTS - composerImagesRef.current.length,
+        );
+        const restoredImages = hydrateImagesFromPersisted(
+          taken.attachments
+            .filter((attachment) => !existingIds.has(attachment.id))
+            .slice(0, capacity),
+        );
+        if (restoredImages.length > 0) {
+          addComposerDraftImages(composerDraftTarget, restoredImages);
+        }
+      }
+      if (taken.droppedImageNames.length > 0) {
+        toastManager.add({
+          type: "warning",
+          title: "Some images were not kept in the queue",
+          description: `${taken.droppedImageNames.join(", ")} exceeded the size limit. Attach again if needed.`,
+        });
+      }
+      composerRef.current?.resetCursorState({
+        cursor: collapseExpandedComposerCursor(nextPrompt, nextPrompt.length),
+        prompt: nextPrompt,
+        detectTrigger: true,
+      });
+      scheduleComposerFocus();
+    },
+    [
+      addComposerDraftImages,
+      composerDraftTarget,
+      composerImagesRef,
+      composerRef,
+      promptRef,
+      scheduleComposerFocus,
+      setComposerCursor,
+      setComposerDraftPrompt,
+      setComposerTrigger,
+      takeQueueEntry,
+    ],
+  );
+  const removeQueueEntry = useCallback(
+    (entry: ComposerQueueEntry) => {
+      takeQueueEntry(entry.id);
+    },
+    [takeQueueEntry],
+  );
+  const sendQueueEntryNow = useCallback(
+    (entry: ComposerQueueEntry) => {
+      onSendQueuedNow(entry.id);
+    },
+    [onSendQueuedNow],
+  );
+  const clearQueue = useCallback(() => {
+    if (queueThreadKey !== null) clearQueueThread(queueThreadKey);
+  }, [clearQueueThread, queueThreadKey]);
+  const resumeQueue = useCallback(() => {
+    if (queueThreadKey !== null) setQueueThreadPaused(queueThreadKey, false);
+  }, [queueThreadKey, setQueueThreadPaused]);
 
   const restoreStashEntry = useCallback(
     (entry: PromptStashEntry) => {
@@ -2946,7 +3066,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   return (
     <form
       ref={composerFormRef}
-      onSubmit={submitComposer}
+      onSubmit={submitComposerFromForm}
       onFocusCapture={(event) => {
         const activeElement = event.target;
         if (
@@ -3097,6 +3217,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         />
       ) : null}
       <div className="relative">
+        <ComposerQueuePanel
+          entries={queueEntries}
+          paused={queuePaused}
+          onSendNow={sendQueueEntryNow}
+          onEdit={editQueueEntry}
+          onRemove={removeQueueEntry}
+          onClear={clearQueue}
+          onResume={resumeQueue}
+        />
         {showShoulderTabs && visibleTasksProgress && visibleTaskSteps ? (
           <ComposerTasksBadge
             expanded={false}
@@ -3576,7 +3705,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     isPreparingWorktree={isPreparingWorktree}
                     hasSendableContent={composerSendState.hasSendableContent}
                     preserveComposerFocusOnPointerDown={isMobileViewport}
-                    showSendWhileRunning={isMobileViewport}
+                    showSendWhileRunning
+                    queueMode={isQueueMode}
                     onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
                     onInterrupt={handleInterruptPrimaryAction}
                     onImplementPlanInNewThread={handleImplementPlanInNewThreadPrimaryAction}
