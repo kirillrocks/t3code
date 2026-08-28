@@ -378,7 +378,13 @@ import { sanitizeThreadErrorMessage } from "~/rpc/transportError";
 import { RightPanelSheet } from "./RightPanelSheet";
 import { previewEnvironment } from "../state/preview";
 import { useAtomCommand } from "../state/use-atom-command";
-import { composerQueueThreadKey, useComposerQueueStore } from "../composerQueueStore";
+import {
+  composerQueueThreadKey,
+  selectComposerQueueEntriesForThread,
+  useComposerQueueStore,
+  type ComposerQueueEntry,
+} from "../composerQueueStore";
+import { ComposerQueuePanel } from "./chat/ComposerQueuePanel";
 import { useComposerQueueDispatcher } from "../composerQueue/useComposerQueueDispatcher";
 import { compressImageForStash } from "../lib/imageCompression";
 import { partitionStashAttachments } from "../promptStashStore";
@@ -5660,7 +5666,9 @@ function ChatViewContent(props: ChatViewProps) {
         text: outgoingMessageText,
         attachments: [],
         droppedImageNames: [],
-        ...(queuedImages.length > 0 ? { pendingImages: true } : {}),
+        ...(queuedImages.length > 0
+          ? { pendingImages: true, imageCount: queuedImages.length }
+          : {}),
         status: "queued",
       });
       if (!written) {
@@ -6080,12 +6088,45 @@ function ChatViewContent(props: ChatViewProps) {
     }
   };
 
+  // Queued messages for this thread (see composerQueueStore). Rendered above
+  // the composer shell so they read as stored messages, not as part of the
+  // composer or the conversation.
+  const composerQueueThreadKeyForRoute =
+    activeThread && isServerThread
+      ? composerQueueThreadKey(activeThread.environmentId, activeThread.id)
+      : null;
+  const composerQueueSelector = useMemo(
+    () => selectComposerQueueEntriesForThread(composerQueueThreadKeyForRoute),
+    [composerQueueThreadKeyForRoute],
+  );
+  const composerQueueEntries = useComposerQueueStore(composerQueueSelector);
+  const composerQueuePaused = useComposerQueueStore((state) =>
+    composerQueueThreadKeyForRoute !== null
+      ? state.pausedThreadKeys.includes(composerQueueThreadKeyForRoute)
+      : false,
+  );
   const onSendQueuedNow = useCallback(
-    (entryId: string) => {
-      void dispatchComposerQueueEntry(entryId);
+    (entry: ComposerQueueEntry) => {
+      void dispatchComposerQueueEntry(entry.id);
     },
     [dispatchComposerQueueEntry],
   );
+  const onEditQueued = useCallback((entry: ComposerQueueEntry) => {
+    composerRef.current?.restoreQueueEntry(entry);
+  }, []);
+  const onRemoveQueued = useCallback((entry: ComposerQueueEntry) => {
+    useComposerQueueStore.getState().take(entry.id);
+  }, []);
+  const onClearQueue = useCallback(() => {
+    if (composerQueueThreadKeyForRoute !== null) {
+      useComposerQueueStore.getState().clearThread(composerQueueThreadKeyForRoute);
+    }
+  }, [composerQueueThreadKeyForRoute]);
+  const onResumeQueue = useCallback(() => {
+    if (composerQueueThreadKeyForRoute !== null) {
+      useComposerQueueStore.getState().setThreadPaused(composerQueueThreadKeyForRoute, false);
+    }
+  }, [composerQueueThreadKeyForRoute]);
 
   const onInterrupt = async () => {
     if (!activeThread) return;
@@ -7105,6 +7146,15 @@ function ChatViewContent(props: ChatViewProps) {
                         : undefined
                     }
                   >
+                    <ComposerQueuePanel
+                      entries={composerQueueEntries}
+                      paused={composerQueuePaused}
+                      onSendNow={onSendQueuedNow}
+                      onEdit={onEditQueued}
+                      onRemove={onRemoveQueued}
+                      onClear={onClearQueue}
+                      onResume={onResumeQueue}
+                    />
                     <div
                       className={cn(
                         "chat-composer-glass-shell relative mx-auto w-full max-w-3xl",
@@ -7178,7 +7228,6 @@ function ChatViewContent(props: ChatViewProps) {
                             composerElementContextsRef={composerElementContextsRef}
                             onSend={onSend}
                             onInterrupt={onInterrupt}
-                            onSendQueuedNow={onSendQueuedNow}
                             onImplementPlanInNewThread={onImplementPlanInNewThread}
                             onRespondToApproval={onRespondToApproval}
                             onSelectActivePendingUserInputOption={

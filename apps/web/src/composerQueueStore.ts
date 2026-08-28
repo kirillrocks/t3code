@@ -33,6 +33,8 @@ const ComposerQueueEntrySchema = Schema.Struct({
   droppedImageNames: Schema.Array(Schema.String),
   /** Images still being encoded; the entry must not be sent until this clears. */
   pendingImages: Schema.optionalKey(Schema.Boolean),
+  /** How many images the user attached, known before encoding finishes. */
+  imageCount: Schema.optionalKey(Schema.Number),
   status: ComposerQueueEntryStatus,
   error: Schema.optionalKey(Schema.String),
 });

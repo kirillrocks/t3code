@@ -67,13 +67,7 @@ import {
 } from "../../promptStashStore";
 import { ComposerStashBadge } from "./ComposerStashBadge";
 import { ComposerStashMenu } from "./ComposerStashMenu";
-import { ComposerQueuePanel } from "./ComposerQueuePanel";
-import {
-  composerQueueThreadKey,
-  selectComposerQueueEntriesForThread,
-  useComposerQueueStore,
-  type ComposerQueueEntry,
-} from "../../composerQueueStore";
+import { useComposerQueueStore, type ComposerQueueEntry } from "../../composerQueueStore";
 import {
   ComposerTasksBadge,
   ComposerTasksDrawer,
@@ -555,6 +549,8 @@ export interface ChatComposerHandle {
   };
   /** Validate the fully composed text immediately before a provider turn starts. */
   validateProviderInput: (providerInput: string) => boolean;
+  /** Pull a queued message back into the composer for editing (removes it from the queue). */
+  restoreQueueEntry: (entry: ComposerQueueEntry) => void;
 }
 
 // --------------------------------------------------------------------------
@@ -646,8 +642,6 @@ export interface ChatComposerProps {
   // Callbacks
   onSend: (e?: { preventDefault: () => void }, intent?: ComposerSubmissionIntent) => void;
   onInterrupt: () => void;
-  /** Sends a queued message right away (steers the running turn). */
-  onSendQueuedNow: (entryId: string) => void;
   onImplementPlanInNewThread: () => void;
   onRespondToApproval: (
     requestId: ApprovalRequestId,
@@ -736,7 +730,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     composerElementContextsRef,
     onSend,
     onInterrupt,
-    onSendQueuedNow,
     onImplementPlanInNewThread,
     onRespondToApproval,
     onSelectActivePendingUserInputOption,
@@ -2173,21 +2166,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // ------------------------------------------------------------------
   // Message queue (Enter while a turn runs)
   // ------------------------------------------------------------------
-  const queueThreadKey =
-    routeKind === "server"
-      ? composerQueueThreadKey(props.routeThreadRef.environmentId, props.routeThreadRef.threadId)
-      : null;
-  const queueEntriesSelector = useMemo(
-    () => selectComposerQueueEntriesForThread(queueThreadKey),
-    [queueThreadKey],
-  );
-  const queueEntries = useComposerQueueStore(queueEntriesSelector);
-  const queuePaused = useComposerQueueStore((state) =>
-    queueThreadKey !== null ? state.pausedThreadKeys.includes(queueThreadKey) : false,
-  );
   const takeQueueEntry = useComposerQueueStore((state) => state.take);
-  const clearQueueThread = useComposerQueueStore((state) => state.clearThread);
-  const setQueueThreadPaused = useComposerQueueStore((state) => state.setThreadPaused);
 
   /** Edit: pull the message back into the composer. Enter re-queues it at the end. */
   const editQueueEntry = useCallback(
@@ -2249,24 +2228,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       takeQueueEntry,
     ],
   );
-  const removeQueueEntry = useCallback(
-    (entry: ComposerQueueEntry) => {
-      takeQueueEntry(entry.id);
-    },
-    [takeQueueEntry],
-  );
-  const sendQueueEntryNow = useCallback(
-    (entry: ComposerQueueEntry) => {
-      onSendQueuedNow(entry.id);
-    },
-    [onSendQueuedNow],
-  );
-  const clearQueue = useCallback(() => {
-    if (queueThreadKey !== null) clearQueueThread(queueThreadKey);
-  }, [clearQueueThread, queueThreadKey]);
-  const resumeQueue = useCallback(() => {
-    if (queueThreadKey !== null) setQueueThreadPaused(queueThreadKey, false);
-  }, [queueThreadKey, setQueueThreadPaused]);
 
   const restoreStashEntry = useCallback(
     (entry: PromptStashEntry) => {
@@ -2946,6 +2907,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         setIsComposerModelPickerOpen((open) => !open);
       },
       compactContext: compactThreadContext,
+      restoreQueueEntry: editQueueEntry,
       isModelPickerOpen: () => isComposerModelPickerOpen,
       readSnapshot: () => {
         return readComposerSnapshot();
@@ -3057,6 +3019,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       selectedPromptEffort,
       selectedProvider,
       selectedProviderModels,
+      editQueueEntry,
       compactThreadContext,
     ],
   );
@@ -3217,15 +3180,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         />
       ) : null}
       <div className="relative">
-        <ComposerQueuePanel
-          entries={queueEntries}
-          paused={queuePaused}
-          onSendNow={sendQueueEntryNow}
-          onEdit={editQueueEntry}
-          onRemove={removeQueueEntry}
-          onClear={clearQueue}
-          onResume={resumeQueue}
-        />
         {showShoulderTabs && visibleTasksProgress && visibleTaskSteps ? (
           <ComposerTasksBadge
             expanded={false}
