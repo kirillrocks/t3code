@@ -751,6 +751,59 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
     }),
   );
 
+  it.effect("replaces a stopped connecting session while its teardown is held", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-opencode-stopped-connecting-retry");
+      const eventSubscribeObserved = promiseWithResolvers<void>();
+      const abortStarted = promiseWithResolvers<void>();
+      const abortRelease = promiseWithResolvers<void>();
+      runtimeMock.state.autoConnect = false;
+      runtimeMock.state.eventSubscribeObserved = () => eventSubscribeObserved.resolve(undefined);
+      runtimeMock.state.createdSessionIds.push("ses_connecting_old", "ses_connecting_replacement");
+
+      const oldStart = yield* adapter
+        .startSession({
+          provider: ProviderDriverKind.make("opencode"),
+          threadId,
+          runtimeMode: "full-access",
+        })
+        .pipe(Effect.result, Effect.forkChild);
+      yield* Effect.promise(() => eventSubscribeObserved.promise);
+
+      runtimeMock.state.abortImplementation = async () => {
+        abortStarted.resolve(undefined);
+        await abortRelease.promise;
+      };
+      const oldStop = yield* adapter.stopSession(threadId).pipe(Effect.forkChild);
+      yield* Effect.promise(() => abortStarted.promise);
+
+      runtimeMock.state.autoConnect = true;
+      runtimeMock.state.abortImplementation = null;
+      const replacement = yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+      NodeAssert.equal(replacement.status, "ready");
+      NodeAssert.deepEqual(replacement.resumeCursor, {
+        schemaVersion: 1,
+        sessionId: "ses_connecting_replacement",
+      });
+
+      abortRelease.resolve(undefined);
+      const oldStartResult = yield* Fiber.join(oldStart);
+      yield* Fiber.join(oldStop);
+      NodeAssert.equal(oldStartResult._tag, "Failure");
+      const current = (yield* adapter.listSessions()).find(
+        (session) => session.threadId === threadId,
+      );
+      NodeAssert.deepEqual(current?.resumeCursor, replacement.resumeCursor);
+
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
   it.effect("returns a durable resume cursor for a freshly created session", () =>
     Effect.gen(function* () {
       const adapter = yield* OpenCodeAdapter;
