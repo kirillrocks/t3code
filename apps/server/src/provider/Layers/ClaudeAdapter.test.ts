@@ -2697,6 +2697,124 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect(
+    "surfaces model refusal fallback as model.rerouted and no-fallback as a warning",
+    () => {
+      const harness = makeHarness();
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        const runtimeEvents: Array<ProviderRuntimeEvent> = [];
+        const runtimeEventsFiber = yield* Stream.runForEach(adapter.streamEvents, (event) =>
+          Effect.sync(() => runtimeEvents.push(event)),
+        ).pipe(Effect.forkChild);
+
+        yield* adapter.startSession({
+          threadId: THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          runtimeMode: "full-access",
+        });
+
+        harness.query.emit({
+          type: "system",
+          subtype: "model_refusal_fallback",
+          trigger: "refusal",
+          direction: "retry",
+          original_model: "claude-fable-5",
+          fallback_model: "claude-opus-4-8",
+          request_id: "req_1",
+          api_refusal_category: "cyber",
+          content: "Switched to Opus 4.8.",
+          session_id: "session",
+          uuid: "mrf-full",
+        } as unknown as SDKMessage);
+        harness.query.emit({
+          type: "system",
+          subtype: "model_refusal_no_fallback",
+          original_model: "claude-fable-5",
+          request_id: "req_2",
+          api_refusal_category: "cyber",
+          content: "",
+          session_id: "session",
+          uuid: "mrnf",
+        } as unknown as SDKMessage);
+        yield* Effect.yieldNow;
+        yield* Effect.yieldNow;
+
+        const rerouted = runtimeEvents.find((event) => event.type === "model.rerouted");
+        assert.equal(rerouted?.type, "model.rerouted");
+        if (rerouted?.type === "model.rerouted") {
+          assert.equal(rerouted.payload.fromModel, "claude-fable-5");
+          assert.equal(rerouted.payload.toModel, "claude-opus-4-8");
+          assert.equal(rerouted.payload.reason, "refusal:cyber");
+        }
+        const warnings = runtimeEvents.filter((event) => event.type === "runtime.warning");
+        assert.deepEqual(
+          warnings.map((event) => event.payload.message),
+          [
+            "claude-fable-5 refused this request (cyber) and model fallback is disabled — the turn stopped without switching models.",
+          ],
+        );
+        runtimeEventsFiber.interruptUnsafe();
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    },
+  );
+
+  it.effect("reports an unannounced assistant model switch as model.rerouted", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const runtimeEvents: Array<ProviderRuntimeEvent> = [];
+      const runtimeEventsFiber = yield* Stream.runForEach(adapter.streamEvents, (event) =>
+        Effect.sync(() => runtimeEvents.push(event)),
+      ).pipe(Effect.forkChild);
+
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+
+      // First observation seeds the baseline; the switch on the second
+      // message is the silent downgrade that must surface; the third repeats
+      // the new model and must stay quiet.
+      for (const [uuid, model] of [
+        ["assistant-a", "claude-fable-5"],
+        ["assistant-b", "claude-opus-4-8"],
+        ["assistant-c", "claude-opus-4-8"],
+      ]) {
+        harness.query.emit({
+          type: "assistant",
+          session_id: "session",
+          uuid,
+          parent_tool_use_id: null,
+          message: {
+            id: `message-${uuid}`,
+            model,
+            content: [{ type: "text", text: "Hi" }],
+          },
+        } as unknown as SDKMessage);
+      }
+      yield* Effect.yieldNow;
+      yield* Effect.yieldNow;
+
+      const rerouted = runtimeEvents.filter((event) => event.type === "model.rerouted");
+      assert.equal(rerouted.length, 1);
+      const event = rerouted[0];
+      if (event?.type === "model.rerouted") {
+        assert.equal(event.payload.fromModel, "claude-fable-5");
+        assert.equal(event.payload.toModel, "claude-opus-4-8");
+        assert.equal(event.payload.reason, "observed");
+      }
+      runtimeEventsFiber.interruptUnsafe();
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("consumes Claude command lifecycle notifications silently", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {

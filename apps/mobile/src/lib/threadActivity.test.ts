@@ -652,6 +652,71 @@ describe("buildThreadFeed", () => {
     ]);
   });
 
+  it("keeps a model.rerouted activity visible when the turn folds", () => {
+    const turnId = TurnId.make("turn-1");
+    const thread = makeThread({
+      id: ThreadId.make("thread-reroute"),
+      projectId: ProjectId.make("project-1"),
+      title: "Rerouted turn",
+      latestTurn: {
+        turnId,
+        state: "completed",
+        requestedAt: "2026-04-01T00:00:00.000Z",
+        startedAt: "2026-04-01T00:00:01.000Z",
+        completedAt: "2026-04-01T00:00:18.000Z",
+        assistantMessageId: MessageId.make("assistant-final"),
+      },
+      messages: [
+        {
+          id: MessageId.make("assistant-final"),
+          role: "assistant",
+          text: "Done.",
+          turnId,
+          streaming: false,
+          createdAt: "2026-04-01T00:00:17.000Z",
+          updatedAt: "2026-04-01T00:00:18.000Z",
+        },
+      ],
+      activities: [
+        makeActivity({
+          id: EventId.make("tool-completed"),
+          kind: "tool.completed",
+          tone: "tool",
+          summary: "Read files",
+          createdAt: "2026-04-01T00:00:05.000Z",
+          turnId,
+          payload: {
+            title: "Read files",
+            itemType: "file_read",
+            status: "completed",
+          },
+        }),
+        makeActivity({
+          id: EventId.make("model-rerouted"),
+          kind: "model.rerouted",
+          tone: "info",
+          summary: "Model switched: claude-fable-5 → claude-opus-4-8",
+          createdAt: "2026-04-01T00:00:07.000Z",
+          turnId,
+          payload: {
+            fromModel: "claude-fable-5",
+            toModel: "claude-opus-4-8",
+            reason: "refusal:cyber",
+          },
+        }),
+      ],
+    });
+
+    const feed = buildThreadFeed(thread);
+    const collapsed = deriveThreadFeedPresentation(feed, thread.latestTurn, new Set());
+    // The tool row folds away; the model switch stays visible.
+    expect(collapsed.map((entry) => entry.id)).toEqual([
+      "turn-fold:turn-1",
+      "model-rerouted",
+      "assistant-final",
+    ]);
+  });
+
   it("measures a steer-superseded turn from its user boundary through trailing work", () => {
     const firstTurnId = TurnId.make("turn-1");
     const secondTurnId = TurnId.make("turn-2");

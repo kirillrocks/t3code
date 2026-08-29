@@ -282,6 +282,10 @@ interface ClaudeSessionContext {
   /** Effective effort for the session's turns; subagents without an explicit
    * effort override inherit this. */
   currentEffort: string | undefined;
+  /** Model the API actually answered with (from assistant message.model or a
+   * refusal-fallback notice), comparable form. Baseline for detecting a
+   * provider-side model switch the CLI did not announce. */
+  observedModelId: string | undefined;
   resumeSessionId: string | undefined;
   readonly pendingApprovals: Map<ApprovalRequestId, PendingApproval>;
   readonly pendingUserInputs: Map<ApprovalRequestId, PendingUserInput>;
@@ -975,6 +979,19 @@ function trimmedString(value: unknown): string | undefined {
   }
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+/**
+ * Comparable API model id: strips CLI suffixes like `[1m]` so the configured
+ * `claude-fable-5[1m]` matches the `claude-fable-5` reported on assistant
+ * messages.
+ */
+function comparableClaudeModelId(value: string | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const bracket = value.indexOf("[");
+  return trimmedString(bracket === -1 ? value : value.slice(0, bracket));
 }
 
 /**
@@ -2947,6 +2964,39 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       });
     }
 
+    // message.model is the model that actually produced this reply. When it
+    // diverges from the configured model (or from a fallback the CLI already
+    // announced), the switch happened without a notice — report it instead of
+    // letting the thread silently run on a different model.
+    const observedModel = comparableClaudeModelId(trimmedString(message.message?.model));
+    if (observedModel) {
+      const expectedModel =
+        context.observedModelId ?? comparableClaudeModelId(context.currentApiModelId);
+      if (expectedModel && observedModel !== expectedModel) {
+        const stamp = yield* makeEventStamp();
+        yield* offerRuntimeEvent({
+          type: "model.rerouted",
+          eventId: stamp.eventId,
+          provider: PROVIDER,
+          createdAt: stamp.createdAt,
+          threadId: context.session.threadId,
+          ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
+          payload: {
+            fromModel: expectedModel,
+            toModel: observedModel,
+            reason: "observed",
+          },
+          providerRefs: nativeProviderRefs(context),
+          raw: {
+            source: "claude.sdk.message",
+            method: "claude/assistant",
+            payload: { model: observedModel },
+          },
+        });
+      }
+      context.observedModelId = observedModel;
+    }
+
     const content = message.message?.content;
     if (Array.isArray(content)) {
       for (const block of content) {
@@ -3128,6 +3178,24 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       case "vcs_state_changed":
       case "code_change_published":
         return;
+      // Wire-only sibling of model_refusal_fallback (absent from the SDK
+      // union): the request was refused and fallback is disabled, so the turn
+      // stops on the selected model. Surface a readable warning instead of
+      // the generic unknown-subtype dump.
+      case "model_refusal_no_fallback": {
+        const refusal = message as unknown as {
+          original_model?: string;
+          api_refusal_category?: string | null;
+        };
+        const refusedModel = trimmedString(refusal.original_model) ?? "The selected model";
+        const category = trimmedString(refusal.api_refusal_category ?? undefined);
+        yield* emitRuntimeWarning(
+          context,
+          `${refusedModel} refused this request${category ? ` (${category})` : ""} and model fallback is disabled — the turn stopped without switching models.`,
+          message,
+        );
+        return;
+      }
     }
 
     switch (message.subtype) {
@@ -3433,9 +3501,31 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           yield* emitRuntimeWarning(context, message.text, message);
         }
         return;
+      // The CLI retried a refused request on a fallback model and the swap is
+      // persistent for the session — the one provider-side model change that
+      // must never be invisible to the user.
+      case "model_refusal_fallback": {
+        const fromModel = trimmedString(message.original_model);
+        const toModel = trimmedString(message.fallback_model);
+        if (!fromModel || !toModel) {
+          return;
+        }
+        context.observedModelId = comparableClaudeModelId(toModel);
+        yield* offerRuntimeEvent({
+          ...base,
+          type: "model.rerouted",
+          payload: {
+            fromModel,
+            toModel,
+            reason: trimmedString(message.api_refusal_category ?? undefined)
+              ? `refusal:${message.api_refusal_category}`
+              : "refusal",
+          },
+        });
+        return;
+      }
       // Inner protocol/UX details with no T3 surface today — consumed
       // deliberately so they don't masquerade as unknown-subtype warnings.
-      case "model_refusal_fallback":
       case "local_command_output":
       case "plugin_install":
       case "commands_changed":
@@ -4398,6 +4488,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         basePermissionMode: permissionMode,
         currentApiModelId: apiModelId,
         currentEffort: effectiveEffort ?? undefined,
+        observedModelId: undefined,
         resumeSessionId: sessionId,
         pendingApprovals,
         pendingUserInputs,
@@ -4519,6 +4610,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           catch: (cause) => toRequestError(input.threadId, "turn/setModel", cause),
         });
         context.currentApiModelId = apiModelId;
+        // The user picked a new model; the next observation is the new baseline.
+        context.observedModelId = undefined;
       }
       context.session = {
         ...context.session,

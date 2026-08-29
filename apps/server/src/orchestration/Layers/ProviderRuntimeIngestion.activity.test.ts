@@ -82,6 +82,32 @@ describe("runtimeEventToActivities task progress", () => {
     expect(usagePayload).not.toHaveProperty("status");
   });
 });
+describe("runtimeEventToActivities model.rerouted", () => {
+  it("persists a visible model-switch activity", () => {
+    const event = {
+      ...base,
+      type: "model.rerouted",
+      eventId: EventId.make("evt-rerouted"),
+      payload: {
+        fromModel: "claude-fable-5",
+        toModel: "claude-opus-4-8",
+        reason: "refusal:cyber",
+      },
+    } satisfies ProviderRuntimeEvent;
+
+    const activities = runtimeEventToActivities(event);
+
+    expect(activities).toHaveLength(1);
+    expect(activities[0]?.kind).toBe("model.rerouted");
+    expect(activities[0]?.summary).toBe("Model switched: claude-fable-5 → claude-opus-4-8");
+    expect(activities[0]?.payload).toEqual({
+      fromModel: "claude-fable-5",
+      toModel: "claude-opus-4-8",
+      reason: "refusal:cyber",
+    });
+  });
+});
+
 describe("runtimeEventToActivities tool streaming persistence", () => {
   const accumulatedStdout = [
     "first line of output",

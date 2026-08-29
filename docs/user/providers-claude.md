@@ -114,6 +114,19 @@ This is different from the recommended Codex setup. Claude Code keeps account an
 multiple files under its config directory, so T3 Code keeps separate config directories isolated
 instead of trying to share part of the state.
 
+## What Happens When Claude Switches Models
+
+Claude can decline a request on your selected model and retry it on a fallback model (for
+example, Fable 5 → Opus 4.8). When that happens, T3 Code shows a "Model switched" notice in the
+thread, with the original model, the model that actually answered, and the reason. The notice
+stays visible after the turn finishes.
+
+If model fallback is disabled in your Claude settings, the turn stops instead of switching, and
+T3 Code shows a warning explaining that no fallback ran.
+
+T3 Code also checks the model reported on each reply. If the answering model ever differs from
+the one you selected without an announced fallback, the same "Model switched" notice appears.
+
 ## I Want To Use OpenRouter
 
 Use this when you want Claude Code to talk to OpenRouter directly, without running a local router.

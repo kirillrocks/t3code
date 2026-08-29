@@ -596,6 +596,11 @@ function deriveTurnFolds(input: {
       if (entry.kind === "work" && entry.entry.agentSpawn !== undefined) {
         continue;
       }
+      // Model reroutes never fold: a provider-side model switch that hides
+      // behind "Worked for …" is a silent downgrade again.
+      if (entry.kind === "work" && entry.entry.sourceActivityKind === "model.rerouted") {
+        continue;
+      }
       hiddenEntryIds.add(entry.id);
     }
     if (hiddenEntryIds.size === 0) {
@@ -815,7 +820,14 @@ export function deriveMessagesTimelineRows(input: {
     }
 
     if (timelineEntry.kind === "work") {
-      if (timelineEntry.entry.agentSpawn !== undefined || timelineEntry.entry.tone === "error") {
+      // Model reroutes render as their own row, never behind a group toggle:
+      // a provider-side model switch hidden in "+N tool calls" is a silent
+      // downgrade again.
+      if (
+        timelineEntry.entry.agentSpawn !== undefined ||
+        timelineEntry.entry.tone === "error" ||
+        timelineEntry.entry.sourceActivityKind === "model.rerouted"
+      ) {
         nextRows.push({
           kind: "work",
           id: timelineEntry.id,
@@ -835,6 +847,7 @@ export function deriveMessagesTimelineRows(input: {
           nextEntry.kind !== "work" ||
           nextEntry.entry.agentSpawn !== undefined ||
           nextEntry.entry.tone === "error" ||
+          nextEntry.entry.sourceActivityKind === "model.rerouted" ||
           activeWorkEntryIds.has(nextEntry.id) ||
           collapsedEntryIds.has(nextEntry.id) ||
           foldsByAnchorEntryId.has(nextEntry.id)

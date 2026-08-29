@@ -77,6 +77,9 @@ export interface ThreadFeedActivity {
   readonly workEntry: WorkLogEntry;
   readonly groupedToolDetail?: boolean;
   readonly live?: boolean;
+  /** Stays visible when the turn folds (e.g. a provider-side model switch —
+   * hiding it behind "Worked for …" would make the downgrade silent again). */
+  readonly neverFold?: boolean;
 }
 
 type WorkLogToolLifecycleStatus = "inProgress" | "completed" | "failed" | "declined" | "stopped";
@@ -729,6 +732,7 @@ function workEntryIcon(entry: DerivedWorkLogEntry): ThreadFeedActivity["icon"] {
     return "message";
   }
   if (entry.sourceActivityKind === "runtime.warning") return "warning";
+  if (entry.sourceActivityKind === "model.rerouted") return "warning";
   if (entry.requestKind === "command") return "command";
   if (entry.requestKind === "file-read") return "eye";
   if (entry.requestKind === "file-change") return "edit";
@@ -1187,6 +1191,20 @@ function groupAdjacentActivities(entries: ReadonlyArray<RawThreadFeedEntry>): Th
       continue;
     }
 
+    // Never-fold activities stay in their own single-entry group so the turn
+    // fold can keep them visible without unfolding their neighbors.
+    if (entry.activity.neverFold) {
+      grouped.push({
+        type: "activity-group",
+        id: entry.id,
+        createdAt: entry.createdAt,
+        turnId: entry.turnId,
+        activities: [entry.activity],
+      });
+      openGroupActivities = null;
+      continue;
+    }
+
     if (openGroupActivities !== null && openGroupTurnId === entry.turnId) {
       openGroupActivities.push(entry.activity);
       continue;
@@ -1304,7 +1322,12 @@ function deriveThreadFeedTurnFolds(
       entries
         .filter(
           (entry) =>
-            entry.id !== firstAssistantMessageId && entry.id !== terminalAssistantMessageId,
+            entry.id !== firstAssistantMessageId &&
+            entry.id !== terminalAssistantMessageId &&
+            !(
+              entry.type === "activity-group" &&
+              entry.activities.some((activity) => activity.neverFold)
+            ),
         )
         .map((entry) => entry.id),
     );
@@ -1454,7 +1477,11 @@ function appendPresentedFeedEntry(
     groupableRun = [];
   };
   for (const activity of activities) {
-    if (activity.workEntry.tone !== "error" && activity.workEntry.agentSpawn !== true) {
+    if (
+      activity.workEntry.tone !== "error" &&
+      activity.workEntry.agentSpawn !== true &&
+      activity.neverFold !== true
+    ) {
       groupableRun.push(activity);
       continue;
     }
@@ -1784,6 +1811,7 @@ export function buildThreadFeed(
               status: workEntryStatus(entry),
               ...(entry.toolLifecycleStatus ? { lifecycleStatus: entry.toolLifecycleStatus } : {}),
               workEntry: entry,
+              ...(entry.sourceActivityKind === "model.rerouted" ? { neverFold: true } : {}),
             },
           };
         }),
