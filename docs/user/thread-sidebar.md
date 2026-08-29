@@ -16,7 +16,11 @@ Pinned, snoozed, and settled sections keep their own order.
 Click into the sidebar search box. While it is empty it lists your recent projects (the ones with
 the newest activity). Type to search projects and threads by name; matching projects show above
 matching threads. Pick a project to show only its threads, the same as the project filter menu.
-Pick it again to go back to all projects. Arrow keys and Enter work in the list; Escape closes it.
+Click the **+** at the end of a project row to start a new thread in that project right away.
+Arrow keys and Enter work in the list; Escape closes it.
+
+While a project filter is on, an **x** button next to the filter menu takes you back to all
+projects in one click.
 
 ## Starting a thread in the same project
 

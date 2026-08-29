@@ -1746,10 +1746,20 @@ const SidebarProjectSearchRow = memo(function SidebarProjectSearchRow(props: {
   resultId: string;
   onHighlight: () => void;
   onSelect: () => void;
+  onNewThread: () => void;
 }) {
   const { group } = props;
   return (
-    <li role="presentation" className="list-none">
+    <li
+      role="presentation"
+      className={cn(
+        "group/project-result flex h-9 items-center gap-1 rounded-md pe-1 text-sm",
+        props.isHighlighted || props.isScoped
+          ? "bg-sidebar-row-active text-sidebar-foreground"
+          : "text-sidebar-foreground/85 hover:bg-sidebar-row-hover hover:text-sidebar-foreground",
+      )}
+      onMouseMove={props.onHighlight}
+    >
       <button
         id={props.resultId}
         type="button"
@@ -1757,15 +1767,9 @@ const SidebarProjectSearchRow = memo(function SidebarProjectSearchRow(props: {
         tabIndex={-1}
         aria-selected={props.isHighlighted}
         aria-label={`Show threads of ${group.displayName}`}
-        onMouseMove={props.onHighlight}
         onPointerDown={(event) => event.preventDefault()}
         onClick={props.onSelect}
-        className={cn(
-          "flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-left text-sm outline-none",
-          props.isHighlighted || props.isScoped
-            ? "bg-sidebar-row-active text-sidebar-foreground"
-            : "text-sidebar-foreground/85 hover:bg-sidebar-row-hover hover:text-sidebar-foreground",
-        )}
+        className="flex h-full min-w-0 flex-1 cursor-pointer items-center gap-2.5 ps-2.5 text-left outline-none"
       >
         <ProjectFavicon
           environmentId={group.environmentId}
@@ -1784,6 +1788,17 @@ const SidebarProjectSearchRow = memo(function SidebarProjectSearchRow(props: {
           {props.threadCount === 1 ? "1 thread" : `${props.threadCount} threads`}
         </span>
       </button>
+      <Button
+        type="button"
+        size="icon-xs"
+        variant="ghost-muted"
+        aria-label={`New thread in ${group.displayName}`}
+        className="size-7 shrink-0 text-sidebar-muted-foreground hover:bg-sidebar-control-surface hover:text-sidebar-foreground"
+        onPointerDown={(event) => event.preventDefault()}
+        onClick={props.onNewThread}
+      >
+        <PlusIcon className="size-4" />
+      </Button>
     </li>
   );
 });
@@ -2474,6 +2489,17 @@ export default function Sidebar() {
       threadSearchInputRef.current?.blur();
     },
     [clearThreadSearch],
+  );
+  const startThreadInProjectSearchResult = useCallback(
+    (group: SidebarProjectSnapshot) => {
+      const projectRef = group.memberProjectRefs[0];
+      if (!projectRef) return;
+      clearThreadSearch();
+      threadSearchInputRef.current?.blur();
+      if (isMobile) setOpenMobile(false);
+      void handleNewThreadRef.current(projectRef);
+    },
+    [clearThreadSearch, isMobile, setOpenMobile],
   );
   const handleThreadSearchKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLInputElement>) => {
@@ -3812,6 +3838,24 @@ export default function Sidebar() {
                     </MenuRadioGroup>
                   </MenuPopup>
                 </Menu>
+                {scopedProjectGroup ? (
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <SidebarMenuButton
+                          size="icon"
+                          type="button"
+                          aria-label="Show all projects"
+                          className="shrink-0 focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
+                          onClick={() => setProjectScopeKey(null)}
+                        />
+                      }
+                    >
+                      <XIcon className="size-4" />
+                    </TooltipTrigger>
+                    <TooltipPopup side="right">Show all projects</TooltipPopup>
+                  </Tooltip>
+                ) : null}
                 <Menu>
                   <Tooltip>
                     <TooltipTrigger
@@ -3881,7 +3925,7 @@ export default function Sidebar() {
             <div className="mb-1">
               <p className="px-2.5 pb-0.5 pt-1 text-[11px] font-medium text-sidebar-muted-foreground">
                 {isSearchingThreads ? "Projects" : "Recent projects"}
-                <span className="font-normal"> · click to show only that project</span>
+                <span className="font-normal"> · click to filter, + for a new thread</span>
               </p>
               <ul
                 id={isSearchingThreads ? undefined : "sidebar-thread-search-results"}
@@ -3899,6 +3943,7 @@ export default function Sidebar() {
                     resultId={`sidebar-thread-search-result-${index}`}
                     onHighlight={() => setActiveSearchResultIndex(index)}
                     onSelect={() => selectProjectSearchResult(group)}
+                    onNewThread={() => startThreadInProjectSearchResult(group)}
                   />
                 ))}
               </ul>
