@@ -716,7 +716,9 @@ const SidebarDraftBlock = memo(function SidebarDraftBlock(props: {
 });
 
 const PROJECT_PEEK_OPEN_DELAY_MS = 0;
-const PROJECT_PEEK_CLOSE_DELAY_MS = 0;
+// Grace for the pointer to travel from the label into the panel. Leaving the
+// panel itself closes at once.
+const PROJECT_PEEK_TRAVEL_GRACE_MS = 150;
 const PROJECT_PEEK_LIMIT = 6;
 
 /**
@@ -748,10 +750,20 @@ function SidebarProjectThreadsPeek(props: {
     clearTimer();
     timerRef.current = setTimeout(() => setOpen(true), PROJECT_PEEK_OPEN_DELAY_MS);
   }, [clearTimer]);
-  const scheduleClose = useCallback(() => {
+  const popupRef = useRef<HTMLDivElement>(null);
+  const closeNow = useCallback(() => {
     clearTimer();
-    timerRef.current = setTimeout(() => setOpen(false), PROJECT_PEEK_CLOSE_DELAY_MS);
+    setOpen(false);
   }, [clearTimer]);
+  const handleLabelLeave = useCallback(
+    (event: ReactMouseEvent) => {
+      const next = event.relatedTarget;
+      if (next instanceof Node && popupRef.current?.contains(next)) return;
+      clearTimer();
+      timerRef.current = setTimeout(() => setOpen(false), PROJECT_PEEK_TRAVEL_GRACE_MS);
+    },
+    [clearTimer],
+  );
   useEffect(() => clearTimer, [clearTimer]);
   useEffect(() => {
     if (!open) setShowAll(false);
@@ -772,7 +784,7 @@ function SidebarProjectThreadsPeek(props: {
           "hover:underline hover:decoration-dotted hover:underline-offset-2",
         )}
         onMouseEnter={scheduleOpen}
-        onMouseLeave={scheduleClose}
+        onMouseLeave={handleLabelLeave}
       >
         {props.projectTitle}
       </span>
@@ -786,8 +798,9 @@ function SidebarProjectThreadsPeek(props: {
           viewportClassName="p-1.5"
         >
           <div
+            ref={popupRef}
             onMouseEnter={clearTimer}
-            onMouseLeave={scheduleClose}
+            onMouseLeave={closeNow}
             onClick={stop}
             onDoubleClick={stop}
             onContextMenu={stop}
