@@ -22,8 +22,10 @@ project row to start a new thread in that project right away. Arrow keys and Ent
 list; Escape closes it.
 
 The project filter menu (**All projects**) has its own search box: open it and type to narrow
-the list, then press Enter or click a project. While a project filter is on, an **x** button next
-to the menu takes you back to all projects in one click.
+the list, then press Enter or click a project. While a project filter is on, a **+** button next
+to the menu starts a new thread in that project, and an **x** button takes you back to all
+projects in one click. In the filtered view every thread shows as a full card, settled ones too,
+with **Reopen** on hover.
 
 ## Other threads of the same project
 

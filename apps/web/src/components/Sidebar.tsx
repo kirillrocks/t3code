@@ -1728,7 +1728,41 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                       timestampFormat={props.timestampFormat}
                     />
                   ) : null}
-                  {props.settlementSupported ? (
+                  {variantAction === "unsettle" && props.settlementSupported ? (
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <button
+                            type="button"
+                            aria-label="Un-settle thread"
+                            onClick={handleUnsettleClick}
+                            className="-mr-1 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-1.5 text-xs text-muted-foreground hover:text-foreground"
+                          />
+                        }
+                      >
+                        <Undo2Icon className="size-3.5" />
+                        Reopen
+                      </TooltipTrigger>
+                      <TooltipPopup>Un-settle thread</TooltipPopup>
+                    </Tooltip>
+                  ) : variantAction === "unsnooze" && props.snoozeSupported ? (
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <button
+                            type="button"
+                            aria-label="Wake thread"
+                            onClick={handleUnsnoozeClick}
+                            className="-mr-1 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-1.5 text-xs text-muted-foreground hover:text-foreground"
+                          />
+                        }
+                      >
+                        <AlarmClockOffIcon className="size-3.5" />
+                        Wake
+                      </TooltipTrigger>
+                      <TooltipPopup>Wake thread</TooltipPopup>
+                    </Tooltip>
+                  ) : props.settlementSupported ? (
                     <Tooltip>
                       <TooltipTrigger
                         render={
@@ -4006,6 +4040,26 @@ export default function Sidebar() {
                         <SidebarMenuButton
                           size="icon"
                           type="button"
+                          aria-label={`New thread in ${scopedProjectGroup.displayName}`}
+                          className="shrink-0 focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
+                          onClick={() => startThreadInProjectSearchResult(scopedProjectGroup)}
+                        />
+                      }
+                    >
+                      <PlusIcon className="size-4" />
+                    </TooltipTrigger>
+                    <TooltipPopup side="right">
+                      New thread in {scopedProjectGroup.displayName}
+                    </TooltipPopup>
+                  </Tooltip>
+                ) : null}
+                {scopedProjectGroup ? (
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <SidebarMenuButton
+                          size="icon"
+                          type="button"
                           aria-label="Show all projects"
                           className="shrink-0 focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
                           onClick={() => setProjectScopeKey(null)}
@@ -4153,7 +4207,10 @@ export default function Sidebar() {
                     // row: every other thread is a full card. Density comes
                     // from users (or the auto rules) actually parking work,
                     // not from the sidebar second-guessing what still matters.
-                    const isCard = section === "active" || section === "pinned";
+                    // With a project filter on, the list is that project's
+                    // history: parked rows get full cards too.
+                    const isCard =
+                      section === "active" || section === "pinned" || scopedProjectGroup !== null;
                     const rowVariant = isCard ? "card" : "slim";
                     return (
                       <SidebarThreadRow
