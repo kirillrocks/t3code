@@ -66,6 +66,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
+  type SyntheticEvent,
 } from "react";
 import { useParams, useRouter } from "@tanstack/react-router";
 
@@ -714,6 +715,133 @@ const SidebarDraftBlock = memo(function SidebarDraftBlock(props: {
   );
 });
 
+const PROJECT_PEEK_OPEN_DELAY_MS = 350;
+const PROJECT_PEEK_CLOSE_DELAY_MS = 200;
+const PROJECT_PEEK_LIMIT = 6;
+
+/**
+ * Hover the project name on a card and a small panel slides up under the
+ * card with the other open threads of that project. Open/close is driven by
+ * our own hover timers (not the popover trigger) so a click on the label
+ * still opens the thread like the rest of the card. Clicks inside the panel
+ * are stopped from bubbling through the portal to the card.
+ */
+function SidebarProjectThreadsPeek(props: {
+  thread: SidebarThreadSummary;
+  projectTitle: string;
+  className: string;
+  openProjectThreads: (thread: SidebarThreadSummary) => readonly SidebarThreadSummary[];
+  onThreadActivate: (threadRef: ScopedThreadRef) => void;
+}) {
+  const { openProjectThreads, thread } = props;
+  const anchorRef = useRef<HTMLSpanElement>(null);
+  const [open, setOpen] = useState(false);
+  const [showAll, setShowAll] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearTimer = useCallback(() => {
+    if (timerRef.current !== null) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  }, []);
+  const scheduleOpen = useCallback(() => {
+    clearTimer();
+    timerRef.current = setTimeout(() => setOpen(true), PROJECT_PEEK_OPEN_DELAY_MS);
+  }, [clearTimer]);
+  const scheduleClose = useCallback(() => {
+    clearTimer();
+    timerRef.current = setTimeout(() => setOpen(false), PROJECT_PEEK_CLOSE_DELAY_MS);
+  }, [clearTimer]);
+  useEffect(() => clearTimer, [clearTimer]);
+  useEffect(() => {
+    if (!open) setShowAll(false);
+  }, [open]);
+  const siblings = useMemo(
+    () => (open ? openProjectThreads(thread) : EMPTY_SIBLING_THREADS),
+    [open, openProjectThreads, thread],
+  );
+  const visibleSiblings = showAll ? siblings : siblings.slice(0, PROJECT_PEEK_LIMIT);
+  const hiddenCount = siblings.length - visibleSiblings.length;
+  const stop = (event: SyntheticEvent) => event.stopPropagation();
+  return (
+    <>
+      <span
+        ref={anchorRef}
+        className={cn(
+          props.className,
+          "hover:underline hover:decoration-dotted hover:underline-offset-2",
+        )}
+        onMouseEnter={scheduleOpen}
+        onMouseLeave={scheduleClose}
+      >
+        {props.projectTitle}
+      </span>
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverPopup
+          anchor={anchorRef}
+          side="bottom"
+          align="start"
+          sideOffset={6}
+          className="w-72 transition-[translate,scale,opacity] duration-200 ease-out data-ending-style:translate-y-1 data-ending-style:opacity-0 data-starting-style:translate-y-2 motion-reduce:transition-none"
+          viewportClassName="p-1.5"
+        >
+          <div
+            onMouseEnter={clearTimer}
+            onMouseLeave={scheduleClose}
+            onClick={stop}
+            onDoubleClick={stop}
+            onContextMenu={stop}
+            onKeyDown={stop}
+            onPointerDown={stop}
+          >
+            <p className="px-2 pb-1 pt-0.5 text-[11px] font-medium text-muted-foreground">
+              {siblings.length === 0
+                ? `No other open threads in ${props.projectTitle}`
+                : `${siblings.length} other open ${siblings.length === 1 ? "thread" : "threads"} in ${props.projectTitle}`}
+            </p>
+            {visibleSiblings.length > 0 ? (
+              <ul
+                role="list"
+                className={cn("flex flex-col gap-px", showAll && "max-h-80 overflow-y-auto")}
+              >
+                {visibleSiblings.map((sibling) => (
+                  <li key={`${sibling.environmentId}:${sibling.id}`} className="list-none">
+                    <button
+                      type="button"
+                      className="flex h-8 w-full cursor-pointer items-center gap-2 rounded-md px-2 text-left text-sm text-foreground/90 hover:bg-accent hover:text-foreground"
+                      onClick={() => {
+                        setOpen(false);
+                        props.onThreadActivate(scopeThreadRef(sibling.environmentId, sibling.id));
+                      }}
+                    >
+                      <span className="min-w-0 flex-1 truncate">{sibling.title}</span>
+                      <span className="shrink-0 text-xs tabular-nums text-muted-foreground/70">
+                        {threadTimeLabel(sibling)}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            {hiddenCount > 0 ? (
+              <button
+                type="button"
+                className="mt-0.5 flex h-7 w-full cursor-pointer items-center gap-2 rounded-md px-2 text-left text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+                onClick={() => setShowAll(true)}
+              >
+                <PlusIcon aria-hidden className="size-3.5 shrink-0" />
+                Show {hiddenCount} more
+              </button>
+            ) : null}
+          </div>
+        </PopoverPopup>
+      </Popover>
+    </>
+  );
+}
+
+const EMPTY_SIBLING_THREADS: readonly SidebarThreadSummary[] = [];
+
 const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   thread: SidebarThreadSummary;
   variant: "card" | "slim";
@@ -773,6 +901,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   // search result (id for aria-activedescendant, ring when highlighted).
   searchResultId?: string | undefined;
   isSearchHighlighted?: boolean | undefined;
+  // Other open threads of the same project, for the hover peek on cards.
+  openProjectThreads?:
+    | ((thread: SidebarThreadSummary) => readonly SidebarThreadSummary[])
+    | undefined;
 }) {
   const {
     isRenaming,
@@ -1460,16 +1592,31 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               {/* The project is the first thing to scan for in a flat list,
                   so it reads at near-title strength instead of as metadata. */}
               {props.projectTitle ? (
-                <span
-                  className={cn(
-                    "min-w-0 flex-1 truncate text-xs",
-                    shouldRecede
-                      ? "font-normal text-secondary-label"
-                      : "font-semibold text-foreground",
-                  )}
-                >
-                  {props.projectTitle}
-                </span>
+                props.openProjectThreads ? (
+                  <SidebarProjectThreadsPeek
+                    thread={thread}
+                    projectTitle={props.projectTitle}
+                    className={cn(
+                      "min-w-0 flex-1 truncate text-xs",
+                      shouldRecede
+                        ? "font-normal text-secondary-label"
+                        : "font-semibold text-foreground",
+                    )}
+                    openProjectThreads={props.openProjectThreads}
+                    onThreadActivate={props.onThreadActivate}
+                  />
+                ) : (
+                  <span
+                    className={cn(
+                      "min-w-0 flex-1 truncate text-xs",
+                      shouldRecede
+                        ? "font-normal text-secondary-label"
+                        : "font-semibold text-foreground",
+                    )}
+                  >
+                    {props.projectTitle}
+                  </span>
+                )
               ) : (
                 <span className="flex-1" />
               )}
@@ -2172,6 +2319,37 @@ export default function Sidebar() {
           : [],
     [isSearchFocused, isSearchingThreads, projectGroups, recentProjectGroups, threadSearchQuery],
   );
+  // Open (pinned + active) threads per logical project, in list order, for
+  // the hover peek on cards. Read through a ref so the getter stays stable
+  // and memoized rows do not re-render when the map changes.
+  const openThreadsByProjectKey = useMemo(() => {
+    const groupKeyByProjectRef = new Map<string, string>(
+      unsortedProjectGroups.flatMap((group) =>
+        group.memberProjectRefs.map(
+          (ref) => [`${ref.environmentId}:${ref.projectId}`, group.projectKey] as const,
+        ),
+      ),
+    );
+    const byProject = new Map<string, SidebarThreadSummary[]>();
+    for (const thread of [...pinnedThreads, ...activeThreads]) {
+      const refKey = `${thread.environmentId}:${thread.projectId}`;
+      const key = groupKeyByProjectRef.get(refKey) ?? refKey;
+      const list = byProject.get(key);
+      if (list) list.push(thread);
+      else byProject.set(key, [thread]);
+    }
+    return { groupKeyByProjectRef, byProject };
+  }, [activeThreads, pinnedThreads, unsortedProjectGroups]);
+  const openThreadsByProjectKeyRef = useRef(openThreadsByProjectKey);
+  openThreadsByProjectKeyRef.current = openThreadsByProjectKey;
+  const getOpenProjectThreads = useCallback((thread: SidebarThreadSummary) => {
+    const { groupKeyByProjectRef, byProject } = openThreadsByProjectKeyRef.current;
+    const refKey = `${thread.environmentId}:${thread.projectId}`;
+    const list = byProject.get(groupKeyByProjectRef.get(refKey) ?? refKey) ?? [];
+    return list.filter(
+      (other) => other.id !== thread.id || other.environmentId !== thread.environmentId,
+    );
+  }, []);
   const threadCountByProjectKey = useMemo(() => {
     const groupKeyByProjectRef = new Map(
       projectGroups.flatMap((group) =>
@@ -4069,6 +4247,7 @@ export default function Sidebar() {
                         isSearchHighlighted={
                           searchPosition !== null && searchPosition === activeSearchResultIndex
                         }
+                        openProjectThreads={isCard ? getOpenProjectThreads : undefined}
                       />
                     );
                   };

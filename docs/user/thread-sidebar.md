@@ -25,6 +25,13 @@ The project filter menu (**All projects**) has its own search box: open it and t
 the list, then press Enter or click a project. While a project filter is on, an **x** button next
 to the menu takes you back to all projects in one click.
 
+## Other threads of the same project
+
+Hold the mouse over the project name on a thread card. After a short pause a small panel slides
+up under the card with the other open threads of that project (up to six, then **Show more**).
+Click one to open it. Move the mouse away and the panel closes. This needs a mouse, so it is not
+available on touch screens; use the search box or the project filter there.
+
 ## Starting a thread in the same project
 
 Click the arrow beside **New thread** to start a thread in the project you are viewing, or pick
