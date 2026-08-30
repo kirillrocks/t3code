@@ -66,6 +66,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
+  type RefObject,
   type SyntheticEvent,
 } from "react";
 import { useParams, useRouter } from "@tanstack/react-router";
@@ -715,141 +716,99 @@ const SidebarDraftBlock = memo(function SidebarDraftBlock(props: {
   );
 });
 
-const PROJECT_PEEK_OPEN_DELAY_MS = 0;
-// Grace for the pointer to travel from the label into the panel. Leaving the
+const PROJECT_PEEK_OPEN_DELAY_MS = 120;
+// Grace for the pointer to travel from the card into the panel. Leaving the
 // panel itself closes at once.
 const PROJECT_PEEK_TRAVEL_GRACE_MS = 150;
 const PROJECT_PEEK_LIMIT = 6;
 
 /**
- * Hover the project name on a card and a small panel slides up under the
- * card with the other open threads of that project. Open/close is driven by
- * our own hover timers (not the popover trigger) so a click on the label
- * still opens the thread like the rest of the card. Clicks inside the panel
- * are stopped from bubbling through the portal to the card.
+ * Hover panel beside a card listing the other open threads of its project.
+ * Replaces the old read-only details tooltip on cards. The row owns the
+ * hover timers and anchor; this only renders. Clicks inside are stopped so
+ * they do not bubble through the portal to the card's own click handler.
  */
-function SidebarProjectThreadsPeek(props: {
-  thread: SidebarThreadSummary;
+function SidebarProjectThreadsPeekPopup(props: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  anchorRef: RefObject<HTMLElement | null>;
+  popupRef: RefObject<HTMLDivElement | null>;
+  onPointerEnter: () => void;
+  onPointerLeave: () => void;
   projectTitle: string;
-  className: string;
-  openProjectThreads: (thread: SidebarThreadSummary) => readonly SidebarThreadSummary[];
+  siblings: readonly SidebarThreadSummary[];
   onThreadActivate: (threadRef: ScopedThreadRef) => void;
 }) {
-  const { openProjectThreads, thread } = props;
-  const anchorRef = useRef<HTMLSpanElement>(null);
-  const [open, setOpen] = useState(false);
+  const { open, siblings } = props;
   const [showAll, setShowAll] = useState(false);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const clearTimer = useCallback(() => {
-    if (timerRef.current !== null) {
-      clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
-  }, []);
-  const scheduleOpen = useCallback(() => {
-    clearTimer();
-    timerRef.current = setTimeout(() => setOpen(true), PROJECT_PEEK_OPEN_DELAY_MS);
-  }, [clearTimer]);
-  const popupRef = useRef<HTMLDivElement>(null);
-  const closeNow = useCallback(() => {
-    clearTimer();
-    setOpen(false);
-  }, [clearTimer]);
-  const handleLabelLeave = useCallback(
-    (event: ReactMouseEvent) => {
-      const next = event.relatedTarget;
-      if (next instanceof Node && popupRef.current?.contains(next)) return;
-      clearTimer();
-      timerRef.current = setTimeout(() => setOpen(false), PROJECT_PEEK_TRAVEL_GRACE_MS);
-    },
-    [clearTimer],
-  );
-  useEffect(() => clearTimer, [clearTimer]);
   useEffect(() => {
     if (!open) setShowAll(false);
   }, [open]);
-  const siblings = useMemo(
-    () => (open ? openProjectThreads(thread) : EMPTY_SIBLING_THREADS),
-    [open, openProjectThreads, thread],
-  );
   const visibleSiblings = showAll ? siblings : siblings.slice(0, PROJECT_PEEK_LIMIT);
   const hiddenCount = siblings.length - visibleSiblings.length;
   const stop = (event: SyntheticEvent) => event.stopPropagation();
   return (
-    <>
-      <span
-        ref={anchorRef}
-        className={cn(
-          props.className,
-          "hover:underline hover:decoration-dotted hover:underline-offset-2",
-        )}
-        onMouseEnter={scheduleOpen}
-        onMouseLeave={handleLabelLeave}
+    <Popover open={open} onOpenChange={props.onOpenChange}>
+      <PopoverPopup
+        anchor={props.anchorRef}
+        side="right"
+        align="start"
+        sideOffset={4}
+        className="w-72 transition-[translate,scale,opacity] duration-200 ease-out data-ending-style:-translate-x-1 data-ending-style:opacity-0 data-starting-style:-translate-x-2 motion-reduce:transition-none"
+        viewportClassName="p-1.5"
       >
-        {props.projectTitle}
-      </span>
-      <Popover open={open} onOpenChange={setOpen}>
-        <PopoverPopup
-          anchor={anchorRef}
-          side="bottom"
-          align="start"
-          sideOffset={0}
-          className="w-72 transition-[translate,scale,opacity] duration-200 ease-out data-ending-style:translate-y-1 data-ending-style:opacity-0 data-starting-style:translate-y-2 motion-reduce:transition-none"
-          viewportClassName="p-1.5"
+        <div
+          ref={props.popupRef}
+          onMouseEnter={props.onPointerEnter}
+          onMouseLeave={props.onPointerLeave}
+          onClick={stop}
+          onDoubleClick={stop}
+          onContextMenu={stop}
+          onKeyDown={stop}
+          onPointerDown={stop}
         >
-          <div
-            ref={popupRef}
-            onMouseEnter={clearTimer}
-            onMouseLeave={closeNow}
-            onClick={stop}
-            onDoubleClick={stop}
-            onContextMenu={stop}
-            onKeyDown={stop}
-            onPointerDown={stop}
-          >
-            <p className="px-2 pb-1 pt-0.5 text-[11px] font-medium text-muted-foreground">
-              {siblings.length === 0
-                ? `No other open threads in ${props.projectTitle}`
-                : `${siblings.length} other open ${siblings.length === 1 ? "thread" : "threads"} in ${props.projectTitle}`}
-            </p>
-            {visibleSiblings.length > 0 ? (
-              <ul
-                role="list"
-                className={cn("flex flex-col gap-px", showAll && "max-h-80 overflow-y-auto")}
-              >
-                {visibleSiblings.map((sibling) => (
-                  <li key={`${sibling.environmentId}:${sibling.id}`} className="list-none">
-                    <button
-                      type="button"
-                      className="flex h-8 w-full cursor-pointer items-center gap-2 rounded-md px-2 text-left text-sm text-foreground/90 hover:bg-accent hover:text-foreground"
-                      onClick={() => {
-                        setOpen(false);
-                        props.onThreadActivate(scopeThreadRef(sibling.environmentId, sibling.id));
-                      }}
-                    >
-                      <span className="min-w-0 flex-1 truncate">{sibling.title}</span>
-                      <span className="shrink-0 text-xs tabular-nums text-muted-foreground/70">
-                        {threadTimeLabel(sibling)}
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-            {hiddenCount > 0 ? (
-              <button
-                type="button"
-                className="mt-0.5 flex h-7 w-full cursor-pointer items-center gap-2 rounded-md px-2 text-left text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
-                onClick={() => setShowAll(true)}
-              >
-                <PlusIcon aria-hidden className="size-3.5 shrink-0" />
-                Show {hiddenCount} more
-              </button>
-            ) : null}
-          </div>
-        </PopoverPopup>
-      </Popover>
-    </>
+          <p className="px-2 pb-1 pt-0.5 text-[11px] font-medium text-muted-foreground">
+            {siblings.length === 0
+              ? `No other open threads in ${props.projectTitle}`
+              : `${siblings.length} other open ${siblings.length === 1 ? "thread" : "threads"} in ${props.projectTitle}`}
+          </p>
+          {visibleSiblings.length > 0 ? (
+            <ul
+              role="list"
+              className={cn("flex flex-col gap-px", showAll && "max-h-80 overflow-y-auto")}
+            >
+              {visibleSiblings.map((sibling) => (
+                <li key={`${sibling.environmentId}:${sibling.id}`} className="list-none">
+                  <button
+                    type="button"
+                    className="flex h-8 w-full cursor-pointer items-center gap-2 rounded-md px-2 text-left text-sm text-foreground/90 hover:bg-accent hover:text-foreground"
+                    onClick={() => {
+                      props.onOpenChange(false);
+                      props.onThreadActivate(scopeThreadRef(sibling.environmentId, sibling.id));
+                    }}
+                  >
+                    <span className="min-w-0 flex-1 truncate">{sibling.title}</span>
+                    <span className="shrink-0 text-xs tabular-nums text-muted-foreground/70">
+                      {threadTimeLabel(sibling)}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {hiddenCount > 0 ? (
+            <button
+              type="button"
+              className="mt-0.5 flex h-7 w-full cursor-pointer items-center gap-2 rounded-md px-2 text-left text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+              onClick={() => setShowAll(true)}
+            >
+              <PlusIcon aria-hidden className="size-3.5 shrink-0" />
+              Show {hiddenCount} more
+            </button>
+          ) : null}
+        </div>
+      </PopoverPopup>
+    </Popover>
   );
 }
 
@@ -942,6 +901,42 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     variant,
     variantAction,
   } = props;
+  // Hover peek (cards only): other open threads of the same project.
+  const openProjectThreads = props.openProjectThreads;
+  const peekAnchorRef = useRef<HTMLDivElement>(null);
+  const peekPopupRef = useRef<HTMLDivElement>(null);
+  const [peekOpen, setPeekOpen] = useState(false);
+  const peekTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearPeekTimer = useCallback(() => {
+    if (peekTimerRef.current !== null) {
+      clearTimeout(peekTimerRef.current);
+      peekTimerRef.current = null;
+    }
+  }, []);
+  useEffect(() => clearPeekTimer, [clearPeekTimer]);
+  const closePeekNow = useCallback(() => {
+    clearPeekTimer();
+    setPeekOpen(false);
+  }, [clearPeekTimer]);
+  const handlePeekAnchorEnter = useCallback(() => {
+    if (!openProjectThreads) return;
+    clearPeekTimer();
+    peekTimerRef.current = setTimeout(() => setPeekOpen(true), PROJECT_PEEK_OPEN_DELAY_MS);
+  }, [clearPeekTimer, openProjectThreads]);
+  const handlePeekAnchorLeave = useCallback(
+    (event: ReactMouseEvent) => {
+      const next = event.relatedTarget;
+      if (next instanceof Node && peekPopupRef.current?.contains(next)) return;
+      clearPeekTimer();
+      peekTimerRef.current = setTimeout(() => setPeekOpen(false), PROJECT_PEEK_TRAVEL_GRACE_MS);
+    },
+    [clearPeekTimer],
+  );
+  const peekSiblings = useMemo(
+    () =>
+      peekOpen && openProjectThreads ? openProjectThreads(props.thread) : EMPTY_SIBLING_THREADS,
+    [openProjectThreads, peekOpen, props.thread],
+  );
   const threadRef = useMemo(
     () => scopeThreadRef(thread.environmentId, thread.id),
     [thread.environmentId, thread.id],
@@ -1578,217 +1573,215 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
         sortable?.isDragging && "z-20 opacity-80",
       )}
     >
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <div
-              role="button"
-              tabIndex={0}
-              data-testid="sidebar-row-card"
-              aria-busy={isRegeneratingTitle || undefined}
-              className={rowSurfaceClassName}
-              onClick={handleClick}
-              onDoubleClick={handleDoubleClick}
-              onKeyDown={handleKeyDown}
-              onContextMenu={handleContextMenu}
+      <div
+        ref={peekAnchorRef}
+        role="button"
+        tabIndex={0}
+        data-testid="sidebar-row-card"
+        aria-busy={isRegeneratingTitle || undefined}
+        className={rowSurfaceClassName}
+        onClick={(event) => {
+          closePeekNow();
+          handleClick(event);
+        }}
+        onDoubleClick={handleDoubleClick}
+        onKeyDown={handleKeyDown}
+        onContextMenu={(event) => {
+          closePeekNow();
+          handleContextMenu(event);
+        }}
+        onMouseEnter={handlePeekAnchorEnter}
+        onMouseLeave={handlePeekAnchorLeave}
+      >
+        <div className="relative z-10 px-[var(--sidebar-row-content-inset)] py-[var(--sidebar-content-inset)]">
+          <div className="flex h-5 min-w-0 items-center gap-1.5">
+            <ProjectFavicon
+              environmentId={thread.environmentId}
+              cwd={props.projectCwd ?? ""}
+              faviconPath={props.projectFaviconPath}
+              className="size-4 shrink-0"
             />
-          }
-        >
-          <div className="relative z-10 px-[var(--sidebar-row-content-inset)] py-[var(--sidebar-content-inset)]">
-            <div className="flex h-5 min-w-0 items-center gap-1.5">
-              <ProjectFavicon
-                environmentId={thread.environmentId}
-                cwd={props.projectCwd ?? ""}
-                faviconPath={props.projectFaviconPath}
-                className="size-4 shrink-0"
-              />
-              {/* The project is the first thing to scan for in a flat list,
+            {/* The project is the first thing to scan for in a flat list,
                   so it reads at near-title strength instead of as metadata. */}
-              {props.projectTitle ? (
-                props.openProjectThreads ? (
-                  <SidebarProjectThreadsPeek
-                    thread={thread}
-                    projectTitle={props.projectTitle}
-                    className={cn(
-                      "min-w-0 flex-1 truncate text-xs",
-                      shouldRecede
-                        ? "font-normal text-secondary-label"
-                        : "font-semibold text-foreground",
-                    )}
-                    openProjectThreads={props.openProjectThreads}
-                    onThreadActivate={props.onThreadActivate}
-                  />
-                ) : (
-                  <span
-                    className={cn(
-                      "min-w-0 flex-1 truncate text-xs",
-                      shouldRecede
-                        ? "font-normal text-secondary-label"
-                        : "font-semibold text-foreground",
-                    )}
-                  >
-                    {props.projectTitle}
-                  </span>
-                )
-              ) : (
-                <span className="flex-1" />
-              )}
+            {props.projectTitle ? (
               <span
-                aria-hidden
-                className="pointer-events-none inline-flex h-5 shrink-0 items-center gap-1"
+                className={cn(
+                  "min-w-0 flex-1 truncate text-xs",
+                  shouldRecede
+                    ? "font-normal text-secondary-label"
+                    : "font-semibold text-foreground",
+                )}
               >
-                {isRemote ? (
-                  <span className="inline-flex shrink-0 items-center text-sidebar-muted-foreground/70">
-                    <ServerIcon aria-hidden className="size-3.5" />
-                  </span>
-                ) : null}
-                {driverKind ? (
-                  <span className="inline-flex shrink-0 items-center">
-                    <ProviderInstanceIcon
-                      driverKind={driverKind}
-                      displayName={
-                        providerEntry?.displayName ??
-                        thread.session?.providerName ??
-                        modelInstanceId
-                      }
-                      accentColor={providerEntry?.accentColor}
-                      showBadge={showInstanceBadge}
-                      // Glyph dims, badge stays saturated; offset matches the composer trigger.
-                      iconClassName="size-3.5 opacity-60"
-                      badgeClassName="right-[-0.1875rem] bottom-[-0.1875rem] h-3 min-w-3 px-0.5 text-[7px]"
-                    />
-                  </span>
-                ) : null}
+                {props.projectTitle}
               </span>
-              {pinIndicator}
-              {/* The visible state owns this slot's width: status at rest,
+            ) : (
+              <span className="flex-1" />
+            )}
+            <span
+              aria-hidden
+              className="pointer-events-none inline-flex h-5 shrink-0 items-center gap-1"
+            >
+              {isRemote ? (
+                <span className="inline-flex shrink-0 items-center text-sidebar-muted-foreground/70">
+                  <ServerIcon aria-hidden className="size-3.5" />
+                </span>
+              ) : null}
+              {driverKind ? (
+                <span className="inline-flex shrink-0 items-center">
+                  <ProviderInstanceIcon
+                    driverKind={driverKind}
+                    displayName={
+                      providerEntry?.displayName ?? thread.session?.providerName ?? modelInstanceId
+                    }
+                    accentColor={providerEntry?.accentColor}
+                    showBadge={showInstanceBadge}
+                    // Glyph dims, badge stays saturated; offset matches the composer trigger.
+                    iconClassName="size-3.5 opacity-60"
+                    badgeClassName="right-[-0.1875rem] bottom-[-0.1875rem] h-3 min-w-3 px-0.5 text-[7px]"
+                  />
+                </span>
+              ) : null}
+            </span>
+            {pinIndicator}
+            {/* The visible state owns this slot's width: status at rest,
                   actions on hover/keyboard focus or while the popover is open. Keeping
                   the hidden state out of flow lets the project label reclaim
                   space without either state overlapping it. */}
-              <span className="group/sidebar-status-slot relative ml-auto flex h-5 min-w-8 shrink-0 items-stretch justify-end text-xs">
-                {/* Read-only status labels yield to the hover actions. Woke is
+            <span className="group/sidebar-status-slot relative ml-auto flex h-5 min-w-8 shrink-0 items-stretch justify-end text-xs">
+              {/* Read-only status labels yield to the hover actions. Woke is
                     itself an action, so it stays pointer-enabled and visible
                     while the other controls appear beside it. */}
-                <span
-                  className={cn(
-                    isWokeStatus
-                      ? "pointer-events-auto"
-                      : "pointer-events-none group-has-[:focus-visible]/sidebar-status-slot:absolute group-has-[:focus-visible]/sidebar-status-slot:right-0 group-has-[:focus-visible]/sidebar-status-slot:opacity-0 group-hover/sidebar-row:absolute group-hover/sidebar-row:right-0 group-hover/sidebar-row:opacity-0",
-                    "flex items-center self-center justify-self-end tabular-nums text-secondary-label transition-opacity",
-                    snoozeMenuOpen && "pointer-events-none absolute right-0 opacity-0",
-                  )}
-                >
-                  {topStatus ? (
-                    isWokeStatus ? (
-                      <Tooltip>
-                        <TooltipTrigger
-                          render={
-                            <button
-                              type="button"
-                              aria-label="Dismiss Woke notification"
-                              onClick={handleAcknowledgeWokeClick}
-                              className={cn(
-                                "inline-flex cursor-pointer items-center gap-1 rounded-sm font-medium outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring",
-                                topStatus.className,
-                              )}
-                            >
-                              <AlarmClockIcon aria-hidden className="size-4 shrink-0" />
-                              <span role="status">{topStatus.label}</span>
-                            </button>
-                          }
-                        />
-                        <TooltipPopup side="top">Dismiss Woke notification</TooltipPopup>
-                      </Tooltip>
-                    ) : (
-                      <span
-                        className={cn(
-                          "inline-flex items-center gap-1 font-medium",
-                          topStatus.className,
-                        )}
-                      >
-                        {topStatus.icon === "working" ? (
-                          <CircleDashedIcon aria-hidden className="size-4 shrink-0" />
-                        ) : topStatus.icon === "done" ? (
-                          <CircleCheckIcon aria-hidden className="size-4 shrink-0" />
-                        ) : null}
-                        {/* The label alone is the live region: a role="status"
+              <span
+                className={cn(
+                  isWokeStatus
+                    ? "pointer-events-auto"
+                    : "pointer-events-none group-has-[:focus-visible]/sidebar-status-slot:absolute group-has-[:focus-visible]/sidebar-status-slot:right-0 group-has-[:focus-visible]/sidebar-status-slot:opacity-0 group-hover/sidebar-row:absolute group-hover/sidebar-row:right-0 group-hover/sidebar-row:opacity-0",
+                  "flex items-center self-center justify-self-end tabular-nums text-secondary-label transition-opacity",
+                  snoozeMenuOpen && "pointer-events-none absolute right-0 opacity-0",
+                )}
+              >
+                {topStatus ? (
+                  isWokeStatus ? (
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <button
+                            type="button"
+                            aria-label="Dismiss Woke notification"
+                            onClick={handleAcknowledgeWokeClick}
+                            className={cn(
+                              "inline-flex cursor-pointer items-center gap-1 rounded-sm font-medium outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring",
+                              topStatus.className,
+                            )}
+                          >
+                            <AlarmClockIcon aria-hidden className="size-4 shrink-0" />
+                            <span role="status">{topStatus.label}</span>
+                          </button>
+                        }
+                      />
+                      <TooltipPopup side="top">Dismiss Woke notification</TooltipPopup>
+                    </Tooltip>
+                  ) : (
+                    <span
+                      className={cn(
+                        "inline-flex items-center gap-1 font-medium",
+                        topStatus.className,
+                      )}
+                    >
+                      {topStatus.icon === "working" ? (
+                        <CircleDashedIcon aria-hidden className="size-4 shrink-0" />
+                      ) : topStatus.icon === "done" ? (
+                        <CircleCheckIcon aria-hidden className="size-4 shrink-0" />
+                      ) : null}
+                      {/* The label alone is the live region: a role="status"
                             wrapper around the ticking duration would make
                             screen readers announce every second. */}
-                        <span role="status">{topStatus.label}</span>
-                        {status === "working" ? (
-                          <span aria-hidden>
-                            <WorkingDuration startedAt={resolveWorkingStartedAt(thread)} />
-                          </span>
-                        ) : null}
-                      </span>
-                    )
-                  ) : (
-                    threadTimeLabel(thread)
-                  )}
-                </span>
-                {props.settlementSupported || showSnoozeButton ? (
-                  <span
-                    className={cn(
-                      // focus-visible, not focus-within: a mouse click leaves
-                      // the Settle button focused, and a plain focus-within
-                      // would keep the controls pinned over the status label
-                      // once the pointer moves away (e.g. after a failed
-                      // settle) instead of cross-fading back.
-                      "pointer-events-none absolute inset-y-0 right-0 flex items-stretch opacity-0 transition-opacity has-[:focus-visible]:pointer-events-auto has-[:focus-visible]:static has-[:focus-visible]:opacity-100 group-hover/sidebar-row:pointer-events-auto group-hover/sidebar-row:static group-hover/sidebar-row:opacity-100",
-                      snoozeMenuOpen && "pointer-events-auto static opacity-100",
-                    )}
-                  >
-                    {showSnoozeButton ? (
-                      <SnoozePopoverButton
-                        open={snoozeMenuOpen}
-                        onOpenChange={setSnoozeMenuOpen}
-                        onSnooze={handleSnoozePreset}
-                        timestampFormat={props.timestampFormat}
-                      />
-                    ) : null}
-                    {props.settlementSupported ? (
-                      <Tooltip>
-                        <TooltipTrigger
-                          render={
-                            <button
-                              type="button"
-                              aria-label="Settle thread"
-                              onClick={handleSettleClick}
-                              className="-mr-1 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-1.5 text-xs text-muted-foreground hover:text-foreground"
-                            />
-                          }
-                        >
-                          <CheckIcon className="size-3.5" />
-                          Settle
-                        </TooltipTrigger>
-                        <TooltipPopup>Settle thread</TooltipPopup>
-                      </Tooltip>
-                    ) : null}
-                  </span>
-                ) : null}
+                      <span role="status">{topStatus.label}</span>
+                      {status === "working" ? (
+                        <span aria-hidden>
+                          <WorkingDuration startedAt={resolveWorkingStartedAt(thread)} />
+                        </span>
+                      ) : null}
+                    </span>
+                  )
+                ) : (
+                  threadTimeLabel(thread)
+                )}
               </span>
-            </div>
-            <div className="mt-1 flex min-w-0 items-center gap-1.5">
-              {title}
-              {isRegeneratingTitle ? (
-                <span role="status" className="sr-only">
-                  Regenerating title
+              {props.settlementSupported || showSnoozeButton ? (
+                <span
+                  className={cn(
+                    // focus-visible, not focus-within: a mouse click leaves
+                    // the Settle button focused, and a plain focus-within
+                    // would keep the controls pinned over the status label
+                    // once the pointer moves away (e.g. after a failed
+                    // settle) instead of cross-fading back.
+                    "pointer-events-none absolute inset-y-0 right-0 flex items-stretch opacity-0 transition-opacity has-[:focus-visible]:pointer-events-auto has-[:focus-visible]:static has-[:focus-visible]:opacity-100 group-hover/sidebar-row:pointer-events-auto group-hover/sidebar-row:static group-hover/sidebar-row:opacity-100",
+                    snoozeMenuOpen && "pointer-events-auto static opacity-100",
+                  )}
+                >
+                  {showSnoozeButton ? (
+                    <SnoozePopoverButton
+                      open={snoozeMenuOpen}
+                      onOpenChange={setSnoozeMenuOpen}
+                      onSnooze={handleSnoozePreset}
+                      timestampFormat={props.timestampFormat}
+                    />
+                  ) : null}
+                  {props.settlementSupported ? (
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <button
+                            type="button"
+                            aria-label="Settle thread"
+                            onClick={handleSettleClick}
+                            className="-mr-1 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-1.5 text-xs text-muted-foreground hover:text-foreground"
+                          />
+                        }
+                      >
+                        <CheckIcon className="size-3.5" />
+                        Settle
+                      </TooltipTrigger>
+                      <TooltipPopup>Settle thread</TooltipPopup>
+                    </Tooltip>
+                  ) : null}
                 </span>
               ) : null}
-              {terminalStatusIcon}
-              {prBadge}
-              {diff ? (
-                <span className="shrink-0 font-mono text-xs">
-                  <span className="text-emerald-600 dark:text-emerald-400">+{diff.insertions}</span>{" "}
-                  <span className="text-red-600 dark:text-red-400">−{diff.deletions}</span>
-                </span>
-              ) : null}
-            </div>
+            </span>
           </div>
-          {props.jumpLabel ? <JumpHintBadge label={props.jumpLabel} /> : null}
-        </TooltipTrigger>
-        {detailsTooltip}
-      </Tooltip>
+          <div className="mt-1 flex min-w-0 items-center gap-1.5">
+            {title}
+            {isRegeneratingTitle ? (
+              <span role="status" className="sr-only">
+                Regenerating title
+              </span>
+            ) : null}
+            {terminalStatusIcon}
+            {prBadge}
+            {diff ? (
+              <span className="shrink-0 font-mono text-xs">
+                <span className="text-emerald-600 dark:text-emerald-400">+{diff.insertions}</span>{" "}
+                <span className="text-red-600 dark:text-red-400">−{diff.deletions}</span>
+              </span>
+            ) : null}
+          </div>
+        </div>
+        {props.jumpLabel ? <JumpHintBadge label={props.jumpLabel} /> : null}
+      </div>
+      {props.projectTitle && openProjectThreads ? (
+        <SidebarProjectThreadsPeekPopup
+          open={peekOpen}
+          onOpenChange={setPeekOpen}
+          anchorRef={peekAnchorRef}
+          popupRef={peekPopupRef}
+          onPointerEnter={clearPeekTimer}
+          onPointerLeave={closePeekNow}
+          projectTitle={props.projectTitle}
+          siblings={peekSiblings}
+          onThreadActivate={props.onThreadActivate}
+        />
+      ) : null}
     </li>
   );
 });
