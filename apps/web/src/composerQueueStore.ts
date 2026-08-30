@@ -35,6 +35,11 @@ const ComposerQueueEntrySchema = Schema.Struct({
   pendingImages: Schema.optionalKey(Schema.Boolean),
   /** How many images the user attached, known before encoding finishes. */
   imageCount: Schema.optionalKey(Schema.Number),
+  /**
+   * The images did not fit in browser storage, so only this browser session
+   * has them (in memory). After a reload they are gone.
+   */
+  imagesNotPersisted: Schema.optionalKey(Schema.Boolean),
   status: ComposerQueueEntryStatus,
   error: Schema.optionalKey(Schema.String),
 });
@@ -47,10 +52,15 @@ const PersistedComposerQueueState = Schema.Struct({
 });
 const decodePersistedComposerQueueState = Schema.decodeUnknownSync(PersistedComposerQueueState);
 
-const baseStorage: StateStorage =
+let baseStorage: StateStorage =
   typeof localStorage !== "undefined" ? localStorage : createMemoryStorage();
 
-function persistState(state: {
+/** Tests swap in a storage with a fake quota. */
+export function setComposerQueueStorageForTest(storage: StateStorage): void {
+  baseStorage = storage;
+}
+
+function writeState(state: {
   entries: ReadonlyArray<ComposerQueueEntry>;
   pausedThreadKeys: ReadonlyArray<string>;
 }): boolean {
@@ -60,18 +70,56 @@ function persistState(state: {
       JSON.stringify({ version: COMPOSER_QUEUE_STORAGE_VERSION, state }),
     );
     return true;
-  } catch (error) {
-    console.error("[COMPOSER-QUEUE] Could not persist queue (storage quota?).", error);
+  } catch {
     return false;
   }
 }
 
-function readPersistedState(): {
+/**
+ * localStorage is ~5MB for the whole origin, and one screenshot can be a
+ * megabyte of data URL. When the queue with its images no longer fits, the
+ * write is retried without the image payloads: the in-memory store keeps
+ * them, so the queue still sends fine in this session, and a reload turns
+ * those entries into a visible "images lost" failure instead of a blocked
+ * queue or a silently stale copy on disk.
+ */
+function persistState(state: {
+  entries: ReadonlyArray<ComposerQueueEntry>;
+  pausedThreadKeys: ReadonlyArray<string>;
+}): boolean {
+  if (writeState(state)) return true;
+  const stripped = state.entries.map((entry) =>
+    entry.attachments.length === 0
+      ? entry
+      : {
+          ...entry,
+          attachments: [],
+          imageCount: entry.imageCount ?? entry.attachments.length,
+          imagesNotPersisted: true,
+        },
+  );
+  if (
+    stripped.some((entry) => entry.imagesNotPersisted) &&
+    writeState({ ...state, entries: stripped })
+  ) {
+    console.warn(
+      "[COMPOSER-QUEUE] Queue images did not fit in browser storage; kept in memory only.",
+    );
+    return true;
+  }
+  console.error("[COMPOSER-QUEUE] Could not persist queue (storage quota?).");
+  return false;
+}
+
+export const QUEUE_IMAGES_LOST_ON_RELOAD_ERROR =
+  "Its images were lost in a reload. Edit to re-attach, or send without them.";
+
+/** Exposed for tests: what the store starts from after a reload. */
+export function parsePersistedComposerQueueState(raw: unknown): {
   entries: ReadonlyArray<ComposerQueueEntry>;
   pausedThreadKeys: ReadonlyArray<string>;
 } {
   try {
-    const raw = baseStorage.getItem(COMPOSER_QUEUE_STORAGE_KEY);
     if (typeof raw !== "string" || raw.length === 0) return { entries: [], pausedThreadKeys: [] };
     const parsed: unknown = JSON.parse(raw);
     const state = (parsed as { state?: unknown } | null)?.state;
@@ -84,17 +132,29 @@ function readPersistedState(): {
       entries: decoded.entries.map((entry) =>
         entry.status === "sending"
           ? { ...entry, status: "failed" as const, error: "Interrupted by a reload. Send again?" }
-          : entry.pendingImages
+          : entry.pendingImages || entry.imagesNotPersisted
             ? {
                 ...entry,
                 pendingImages: false,
+                imagesNotPersisted: false,
                 status: "failed" as const,
-                error: "Its images were lost in a reload. Edit to re-attach, or send without them.",
+                error: QUEUE_IMAGES_LOST_ON_RELOAD_ERROR,
               }
             : entry,
       ),
       pausedThreadKeys: decoded.pausedThreadKeys,
     };
+  } catch {
+    return { entries: [], pausedThreadKeys: [] };
+  }
+}
+
+function readPersistedState(): {
+  entries: ReadonlyArray<ComposerQueueEntry>;
+  pausedThreadKeys: ReadonlyArray<string>;
+} {
+  try {
+    return parsePersistedComposerQueueState(baseStorage.getItem(COMPOSER_QUEUE_STORAGE_KEY));
   } catch {
     return { entries: [], pausedThreadKeys: [] };
   }
