@@ -715,8 +715,8 @@ const SidebarDraftBlock = memo(function SidebarDraftBlock(props: {
   );
 });
 
-const PROJECT_PEEK_OPEN_DELAY_MS = 350;
-const PROJECT_PEEK_CLOSE_DELAY_MS = 200;
+const PROJECT_PEEK_OPEN_DELAY_MS = 0;
+const PROJECT_PEEK_CLOSE_DELAY_MS = 0;
 const PROJECT_PEEK_LIMIT = 6;
 
 /**
@@ -781,7 +781,7 @@ function SidebarProjectThreadsPeek(props: {
           anchor={anchorRef}
           side="bottom"
           align="start"
-          sideOffset={6}
+          sideOffset={0}
           className="w-72 transition-[translate,scale,opacity] duration-200 ease-out data-ending-style:translate-y-1 data-ending-style:opacity-0 data-starting-style:translate-y-2 motion-reduce:transition-none"
           viewportClassName="p-1.5"
         >
