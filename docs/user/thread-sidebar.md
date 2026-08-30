@@ -15,12 +15,15 @@ Pinned, snoozed, and settled sections keep their own order.
 
 Click into the sidebar search box. While it is empty it lists your recent projects (the ones with
 the newest activity). Type to search projects and threads by name; matching projects show above
-matching threads. Pick a project to show only its threads, the same as the project filter menu.
-Click the **+** at the end of a project row to start a new thread in that project right away.
-Arrow keys and Enter work in the list; Escape closes it.
+matching threads. Matching threads keep their normal cards and sections (pinned, active,
+snoozed, settled), so the list looks the same as when you are not searching. Pick a project to
+show only its threads, the same as the project filter menu. Click the **+** at the end of a
+project row to start a new thread in that project right away. Arrow keys and Enter work in the
+list; Escape closes it.
 
-While a project filter is on, an **x** button next to the filter menu takes you back to all
-projects in one click.
+The project filter menu (**All projects**) has its own search box: open it and type to narrow
+the list, then press Enter or click a project. While a project filter is on, an **x** button next
+to the menu takes you back to all projects in one click.
 
 ## Starting a thread in the same project
 
