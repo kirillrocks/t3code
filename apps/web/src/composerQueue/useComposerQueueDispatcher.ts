@@ -17,7 +17,7 @@ import { readFileAsDataUrl } from "../components/ChatView.logic";
 import {
   awaitAttachmentUploads,
   getUploadedAttachments,
-  releaseAttachmentUploads,
+  releaseAttachmentUpload,
   startAttachmentUpload,
 } from "../lib/attachmentUploadQueue";
 import { readThreadShell, useServerConfigs } from "../state/entities";
@@ -77,7 +77,7 @@ export function useComposerQueueDispatcher() {
         if (result._tag === "Failure") {
           throw squashAtomCommandFailure(result);
         }
-        releaseAttachmentUploads(images);
+        for (const image of images) releaseAttachmentUpload(image.id);
         useComposerQueueStore.getState().take(entryId);
         return true;
       } catch (error) {
