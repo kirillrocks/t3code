@@ -36,7 +36,7 @@ export function resolveNextComposerQueueEntry(input: {
 }): ComposerQueueEntry | null {
   const head = input.entries[0];
   if (!head || input.paused || !input.shell) return null;
-  if (head.status !== "queued" || head.pendingImages) return null;
+  if (head.status !== "queued" || head.pendingImages || head.pendingFiles) return null;
   if (isThreadBusyForQueue(input.shell, { now: input.now })) return null;
   return head;
 }

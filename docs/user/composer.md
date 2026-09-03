@@ -106,7 +106,9 @@ next one.
   it; the messages behind it wait.
 
 Queued messages live in this browser or desktop app until they are sent. Keep it open; another
-device does not see them.
+device does not see them. Images travel with the message. Files (PDFs, ZIPs, and so on) are kept
+on the server as uploads, so a queued message with files survives a reload as long as it is sent
+within a day. A queued message shows how many images and files it carries.
 
 ## Commands and skills
 

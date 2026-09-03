@@ -130,6 +130,17 @@ describe("resolveNextComposerQueueEntry", () => {
     ).toBeNull();
   });
 
+  it("waits while the head's files are still uploading", () => {
+    expect(
+      resolveNextComposerQueueEntry({
+        shell: shell(),
+        entries: [entry({ pendingFiles: true })],
+        paused: false,
+        now: NOW,
+      }),
+    ).toBeNull();
+  });
+
   it("never skips past a failed or in-flight head", () => {
     for (const status of ["failed", "sending"] as const) {
       expect(

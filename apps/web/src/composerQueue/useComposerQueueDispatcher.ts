@@ -18,7 +18,9 @@ import {
   awaitAttachmentUploads,
   getUploadedAttachments,
   releaseAttachmentUpload,
+  releasePersistedAttachmentUpload,
   startAttachmentUpload,
+  verifyStashedAttachmentUpload,
 } from "../lib/attachmentUploadQueue";
 import { readThreadShell, useServerConfigs } from "../state/entities";
 import { threadEnvironment } from "../state/threads";
@@ -50,6 +52,7 @@ export function useComposerQueueDispatcher() {
       const environmentId = entry.environmentId as EnvironmentId;
       const threadId = entry.threadId as ThreadId;
       const images = hydrateImagesFromPersisted(entry.attachments);
+      const files = entry.files ?? [];
       try {
         const attachments = await resolveAttachments({
           environmentId,
@@ -57,6 +60,29 @@ export function useComposerQueueDispatcher() {
           supportsUploads:
             serverConfigs.get(environmentId)?.environment.capabilities.attachmentUploads === true,
         });
+        // Pending uploads are swept after a day; ask before pointing a
+        // message at one that is gone.
+        for (const file of files) {
+          const verification = await verifyStashedAttachmentUpload({
+            environmentId,
+            attachmentId: file.attachmentId,
+          });
+          if (verification.status === "missing") {
+            throw new Error(
+              `The upload for ${file.name} expired (uploads are kept for a day). Edit and attach it again.`,
+            );
+          }
+          if (verification.status === "failed") {
+            throw new Error(`Could not check the upload for ${file.name}. Send again.`);
+          }
+          attachments.push({
+            type: "file",
+            id: file.attachmentId,
+            name: file.name,
+            mimeType: file.mimeType,
+            sizeBytes: file.sizeBytes,
+          });
+        }
         const shell = readThreadShell(scopeThreadRef(environmentId, threadId));
         const result = await startThreadTurn({
           environmentId,
@@ -78,6 +104,14 @@ export function useComposerQueueDispatcher() {
           throw squashAtomCommandFailure(result);
         }
         for (const image of images) releaseAttachmentUpload(image.id);
+        // The message owns the bytes now; drop the pending copies.
+        for (const file of files) {
+          releasePersistedAttachmentUpload({
+            id: file.id,
+            environmentId,
+            attachmentId: file.attachmentId,
+          });
+        }
         useComposerQueueStore.getState().take(entryId);
         return true;
       } catch (error) {

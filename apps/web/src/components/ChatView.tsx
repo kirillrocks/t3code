@@ -245,6 +245,8 @@ import {
   useComposerDraftStore,
   type DraftId,
   type PersistedComposerImageAttachment,
+  composerFileNeedsReattach,
+  type PersistedComposerFileAttachment,
 } from "../composerDraftStore";
 import {
   appendTerminalContextsToPrompt,
@@ -404,6 +406,7 @@ import {
 } from "../composerQueueStore";
 import { ComposerQueuePanel } from "./chat/ComposerQueuePanel";
 import { useComposerQueueDispatcher } from "../composerQueue/useComposerQueueDispatcher";
+import { releaseQueuedEntryFiles } from "../composerQueue/queuedFiles";
 import { continueThreadInNewDraft } from "../threadContinuation";
 import { useThreadHandoffSummary } from "../hooks/useThreadHandoffSummary";
 import { compressImageForStash } from "../lib/imageCompression";
@@ -5889,6 +5892,31 @@ function ChatViewContent(props: ChatViewProps) {
       const queueEntryId = newMessageId();
       const queueThreadKey = composerQueueThreadKey(activeThread.environmentId, threadIdForSend);
       const queuedImages = [...composerImages];
+      const queuedFiles = [...composerFiles];
+      if (queuedFiles.length > 0) {
+        const config =
+          appAtomRegistry.get(environmentServerConfigsAtom).get(activeThread.environmentId) ?? null;
+        const liveSupportsAttachmentUploads =
+          config?.environment.capabilities.attachmentUploads === true;
+        const fileBlockReason = fileAttachmentCapabilityBlockReason({
+          files: queuedFiles,
+          attachmentUploadsCapabilityKnown: config !== null,
+          supportsAttachmentUploads: liveSupportsAttachmentUploads,
+          maxFileAttachmentBytes:
+            config?.environment.capabilities.fileAttachments?.maxUploadBytes ?? null,
+        });
+        if (fileBlockReason !== null) {
+          setThreadError(threadIdForSend, fileBlockReason);
+          return;
+        }
+        if (queuedFiles.some(composerFileNeedsReattach)) {
+          setThreadError(
+            threadIdForSend,
+            "Attach dropped files again or remove them before queueing.",
+          );
+          return;
+        }
+      }
       const written = queueStore.enqueue({
         id: queueEntryId,
         threadKey: queueThreadKey,
@@ -5902,6 +5930,7 @@ function ChatViewContent(props: ChatViewProps) {
         ...(queuedImages.length > 0
           ? { pendingImages: true, imageCount: queuedImages.length }
           : {}),
+        ...(queuedFiles.length > 0 ? { pendingFiles: true, fileCount: queuedFiles.length } : {}),
         status: "queued",
       });
       if (!written) {
@@ -5940,6 +5969,47 @@ function ChatViewContent(props: ChatViewProps) {
             attachments: kept,
             droppedImageNames: [...droppedImageNames, ...droppedNames],
             pendingImages: false,
+          });
+        })();
+      }
+      if (queuedFiles.length > 0) {
+        // Uploads started while composing; this only waits for them. The
+        // entry keeps upload references, so no file bytes hit the browser.
+        for (const file of queuedFiles) {
+          startAttachmentUpload({ environmentId: activeThread.environmentId, image: file });
+        }
+        void (async () => {
+          await awaitAttachmentUploads(queuedFiles.map((file) => file.id));
+          const uploadedFiles: PersistedComposerFileAttachment[] = [];
+          const droppedFileNames: string[] = [];
+          for (const file of queuedFiles) {
+            const uploaded = getUploadedAttachments({
+              environmentId: activeThread.environmentId,
+              images: [file],
+            })?.[0];
+            if (!uploaded) {
+              droppedFileNames.push(file.name);
+              continue;
+            }
+            uploadedFiles.push({
+              id: file.id,
+              name: file.name,
+              mimeType: file.mimeType,
+              sizeBytes: file.sizeBytes,
+              attachmentId: uploaded.id,
+              environmentId: activeThread.environmentId,
+            });
+          }
+          useComposerQueueStore.getState().update(queueEntryId, {
+            files: uploadedFiles,
+            droppedFileNames,
+            pendingFiles: false,
+            ...(droppedFileNames.length > 0
+              ? {
+                  status: "failed" as const,
+                  error: `Upload failed for ${droppedFileNames.join(", ")}. Edit to attach again, or send without.`,
+                }
+              : {}),
           });
         })();
       }
@@ -6464,11 +6534,16 @@ function ChatViewContent(props: ChatViewProps) {
     composerRef.current?.restoreQueueEntry(entry);
   }, []);
   const onRemoveQueued = useCallback((entry: ComposerQueueEntry) => {
-    useComposerQueueStore.getState().take(entry.id);
+    const taken = useComposerQueueStore.getState().take(entry.id);
+    if (taken) releaseQueuedEntryFiles(taken);
   }, []);
   const onClearQueue = useCallback(() => {
     if (composerQueueThreadKeyForRoute !== null) {
-      useComposerQueueStore.getState().clearThread(composerQueueThreadKeyForRoute);
+      const store = useComposerQueueStore.getState();
+      for (const entry of store.entries) {
+        if (entry.threadKey === composerQueueThreadKeyForRoute) releaseQueuedEntryFiles(entry);
+      }
+      store.clearThread(composerQueueThreadKeyForRoute);
     }
   }, [composerQueueThreadKeyForRoute]);
   const onResumeQueue = useCallback(() => {

@@ -2,7 +2,10 @@ import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import { create } from "zustand";
 
-import { PersistedComposerImageAttachment } from "./composerDraftStore";
+import {
+  PersistedComposerFileAttachment,
+  PersistedComposerImageAttachment,
+} from "./composerDraftStore";
 import { createMemoryStorage, type StateStorage } from "./lib/storage";
 
 /**
@@ -40,6 +43,15 @@ const ComposerQueueEntrySchema = Schema.Struct({
    * has them (in memory). After a reload they are gone.
    */
   imagesNotPersisted: Schema.optionalKey(Schema.Boolean),
+  /**
+   * Files ride as references to their server-side uploads (the upload
+   * happens while composing), so no file bytes live in the browser.
+   */
+  files: Schema.optionalKey(Schema.Array(PersistedComposerFileAttachment)),
+  droppedFileNames: Schema.optionalKey(Schema.Array(Schema.String)),
+  /** Files still uploading; the entry must not be sent until this clears. */
+  pendingFiles: Schema.optionalKey(Schema.Boolean),
+  fileCount: Schema.optionalKey(Schema.Number),
   status: ComposerQueueEntryStatus,
   error: Schema.optionalKey(Schema.String),
 });
@@ -113,6 +125,8 @@ function persistState(state: {
 
 export const QUEUE_IMAGES_LOST_ON_RELOAD_ERROR =
   "Its images were lost in a reload. Edit to re-attach, or send without them.";
+export const QUEUE_FILES_LOST_ON_RELOAD_ERROR =
+  "Its files did not finish uploading before a reload. Edit to attach them again, or send without them.";
 
 /** Exposed for tests: what the store starts from after a reload. */
 export function parsePersistedComposerQueueState(raw: unknown): {
@@ -137,10 +151,18 @@ export function parsePersistedComposerQueueState(raw: unknown): {
                 ...entry,
                 pendingImages: false,
                 imagesNotPersisted: false,
+                pendingFiles: false,
                 status: "failed" as const,
                 error: QUEUE_IMAGES_LOST_ON_RELOAD_ERROR,
               }
-            : entry,
+            : entry.pendingFiles
+              ? {
+                  ...entry,
+                  pendingFiles: false,
+                  status: "failed" as const,
+                  error: QUEUE_FILES_LOST_ON_RELOAD_ERROR,
+                }
+              : entry,
       ),
       pausedThreadKeys: decoded.pausedThreadKeys,
     };

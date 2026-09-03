@@ -2485,6 +2485,56 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           description: `${taken.droppedImageNames.join(", ")} exceeded the size limit. Attach again if needed.`,
         });
       }
+      const takenFiles = taken.files ?? [];
+      if (takenFiles.length > 0) {
+        const filesNow = composerFilesRef.current;
+        const existingFileIds = new Set(filesNow.map((file) => file.id));
+        const capacity = Math.max(
+          0,
+          PROVIDER_SEND_TURN_MAX_ATTACHMENTS - composerImagesRef.current.length - filesNow.length,
+        );
+        const candidates = takenFiles.filter((file) => !existingFileIds.has(file.id));
+        const restoredFiles: ComposerFileAttachment[] = candidates
+          .slice(0, capacity)
+          .map((file) => ({
+            type: "file" as const,
+            id: file.id,
+            name: file.name,
+            mimeType: file.mimeType,
+            sizeBytes: file.sizeBytes,
+            file: null,
+            uploadedAttachmentId: file.attachmentId,
+            uploadEnvironmentId: file.environmentId,
+          }));
+        for (const file of candidates.slice(capacity)) {
+          releasePersistedAttachmentUpload({
+            id: file.id,
+            environmentId: file.environmentId,
+            attachmentId: file.attachmentId,
+          });
+        }
+        if (restoredFiles.length > 0) {
+          addComposerDraftFiles(composerDraftTarget, restoredFiles);
+        }
+        if (candidates.length > capacity) {
+          toastManager.add({
+            type: "warning",
+            title: "Some files did not fit in the composer",
+            description: `${candidates
+              .slice(capacity)
+              .map((file) => file.name)
+              .join(", ")} went over the attachment limit.`,
+          });
+        }
+      }
+      const droppedFileNames = taken.droppedFileNames ?? [];
+      if (droppedFileNames.length > 0) {
+        toastManager.add({
+          type: "warning",
+          title: "Some files were not kept in the queue",
+          description: `${droppedFileNames.join(", ")} did not finish uploading. Attach again if needed.`,
+        });
+      }
       composerRef.current?.resetCursorState({
         cursor: collapseExpandedComposerCursor(nextPrompt, nextPrompt.length),
         prompt: nextPrompt,
