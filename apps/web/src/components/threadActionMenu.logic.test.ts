@@ -40,6 +40,7 @@ describe("buildThreadActionMenuItems", () => {
       "rename",
       "mark-unread",
       "copy",
+      "project-settings",
       "archive",
       "delete",
     ]);
@@ -52,6 +53,17 @@ describe("buildThreadActionMenuItems", () => {
       "continue-in-new-thread",
       "new-thread-on-branch",
     ]);
+  });
+
+  it("groups project settings with utility actions before archive", () => {
+    const items = buildThreadActionMenuItems(baseState);
+    const copyIndex = items.findIndex((item) => item.id === "copy");
+    expect(items[copyIndex + 1]).toMatchObject({
+      id: "project-settings",
+      label: "Project settings",
+      icon: "settings",
+    });
+    expect(items[copyIndex + 2]?.id).toBe("archive");
   });
 
   it("includes branch items only for threads with a branch", () => {
